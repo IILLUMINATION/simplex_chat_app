@@ -1,0 +1,8 @@
+name: SimplexBindings
+description: Dart FFI bindings for SimpleX C API.
+output: lib/src/ffi/simplex_bindings.dart
+headers:
+  entry-points:
+    - native/simplex.h
+preamble: |
+  // ignore_for_file: type=lint
