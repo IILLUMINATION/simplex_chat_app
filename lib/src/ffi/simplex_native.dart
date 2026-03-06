@@ -17,9 +17,10 @@ import 'simplex_bindings.dart';
 /// - runs blocking receive loop in a dedicated isolate.
 class SimplexNative {
   SimplexNative({ffi.DynamicLibrary? dynamicLibrary})
-    : _library = dynamicLibrary ?? _openDynamicLibrary();
+    : _providedLibrary = dynamicLibrary;
 
-  final ffi.DynamicLibrary _library;
+  final ffi.DynamicLibrary? _providedLibrary;
+  late final ffi.DynamicLibrary _library = _providedLibrary ?? _openDynamicLibrary();
   late final SimplexBindings _bindings = SimplexBindings(_library);
 
   static bool _hsInitialized = false;

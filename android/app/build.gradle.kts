@@ -8,7 +8,10 @@ plugins {
 android {
     namespace = "com.example.simplex_chat_app"
     compileSdk = flutter.compileSdkVersion
-    ndkVersion = flutter.ndkVersion
+    
+    // 👇 ИЗМЕНИТЬ ЭТУ СТРОКУ:
+    // ndkVersion = flutter.ndkVersion
+    ndkVersion = "28.2.13676358"  // ← одна из версий, которые у вас есть в /Sdk/ndk/
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -20,10 +23,7 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "com.example.simplex_chat_app"
-        // You can update the following values to match your application needs.
-        // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
@@ -32,13 +32,10 @@ android {
 
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
         }
     }
 }
-
 flutter {
     source = "../.."
 }
