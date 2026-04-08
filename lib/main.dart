@@ -1,133 +1,58 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'src/localization/app_localizations.dart';
+import 'src/providers/locale_provider.dart';
+import 'src/providers/persistent_store.dart';
+import 'src/providers/theme_provider.dart';
 import 'src/service/simplex_service.dart';
+import 'src/ui/home_screen.dart';
+
+// Global provider so all screens share the same SimplexService
+final simplexServiceProvider = Provider<SimplexService>((ref) {
+  final service = SimplexService();
+  ref.onDispose(() => service.dispose());
+  return service;
+});
 
 void main() {
-  runApp(const SimplexApp());
+  runApp(const ProviderScope(child: SimplexApp()));
 }
 
-class SimplexApp extends StatelessWidget {
+class SimplexApp extends ConsumerWidget {
   const SimplexApp({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final themeConfig = ref.watch(themeNotifierProvider);
+    final localeConfig = ref.watch(localeNotifierProvider);
+    final notifier = ref.watch(themeNotifierProvider.notifier);
+    final locale = AppLocale.fromCode(localeConfig.locale);
+
     return MaterialApp(
-      title: 'SimpleX FFI Test',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF0C7D69)),
-      ),
-      home: const SimplexHomePage(),
+      title: 'SimpleX Chat',
+      debugShowCheckedModeBanner: false,
+      themeMode: AppThemeMode.fromName(themeConfig.mode).flutterMode,
+      theme: notifier.lightTheme,
+      darkTheme: notifier.darkTheme,
+      locale: locale.flutterLocale,
+      supportedLocales: const [
+        Locale('en'),
+        Locale('ru'),
+      ],
+      localizationsDelegates: const [
+        AppLocalizationsDelegate(),
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      home: const HomeScreen(),
     );
   }
 }
 
-class SimplexHomePage extends StatefulWidget {
-  const SimplexHomePage({super.key});
-
-  @override
-  State<SimplexHomePage> createState() => _SimplexHomePageState();
-}
-
-class _SimplexHomePageState extends State<SimplexHomePage> {
-  late final SimplexService _service;
-  bool _busy = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _service = SimplexService();
-  }
-
-  @override
-  void dispose() {
-    _service.dispose();
-    super.dispose();
-  }
-
-  Future<void> _initCore() async {
-    setState(() => _busy = true);
-    try {
-      await _service.initialize();
-    } catch (_) {
-      // Error is already written to on-screen logs by the service.
-    } finally {
-      if (mounted) {
-        setState(() => _busy = false);
-      }
-    }
-  }
-
-  Future<void> _sendTestCommand() async {
-    setState(() => _busy = true);
-    try {
-      await _service.sendTestCommand();
-    } finally {
-      if (mounted) {
-        setState(() => _busy = false);
-      }
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('SimpleX Core Test')),
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Column(
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: ElevatedButton(
-                      onPressed: _busy ? null : _initCore,
-                      child: const Text('Init Core'),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: ElevatedButton(
-                      onPressed: _busy ? null : _sendTestCommand,
-                      child: const Text('Send Test Command'),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              Expanded(
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    border: Border.all(color: Colors.black26),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: ValueListenableBuilder<List<String>>(
-                    valueListenable: _service.logs,
-                    builder: (context, logs, _) {
-                      if (logs.isEmpty) {
-                        return const Center(
-                          child: Text('Logs will appear here...'),
-                        );
-                      }
-
-                      return ListView.builder(
-                        padding: const EdgeInsets.all(10),
-                        itemCount: logs.length,
-                        itemBuilder: (context, index) {
-                          return Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 4),
-                            child: Text(logs[index]),
-                          );
-                        },
-                      );
-                    },
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
+/// Force rebuild after locale change
+void restartApp(WidgetRef ref) {
+  ref.invalidate(persistedLocaleProvider);
 }

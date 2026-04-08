@@ -56,35 +56,36 @@ class SimplexNative {
   /// Initializes SimpleX core and captures `chat_ctrl` from `chat_migrate_init_key`.
   ///
   /// Returns JSON string provided by native function.
-  Future<String> migrateInitKey({
-    required String path,
-    required String key,
-    required bool keepKey,
-    required String confirm,
-    int backgroundMode = 0,
-  }) async {
+  ///
+  /// [confirm] must be one of: 'yesUp', 'yesUpDown', or 'error'.
+  /// This is a migration confirmation, NOT a password confirmation.
+  Future<String> migrateInitKey({required String path, String confirm = 'yesUp'}) async {
     await init();
 
+    const strongPass = 'Simplex_Strong_Password_12345!!!';
     final pathPtr = path.toNativeUtf8();
-    final keyPtr = key.toNativeUtf8();
+    final passPtr = strongPass.toNativeUtf8();
     final confirmPtr = confirm.toNativeUtf8();
     final ctrlOut = calloc<chat_ctrl>();
 
     try {
+      print('Calling Haskell: path=$path, pass=$strongPass, confirm=$confirm, keepKey=0');
       final resultPtr = _bindings.chat_migrate_init_key(
         pathPtr.cast<ffi.Char>(),
-        keyPtr.cast<ffi.Char>(),
-        keepKey ? 1 : 0,
+        passPtr.cast<ffi.Char>(),
+        0,
         confirmPtr.cast<ffi.Char>(),
-        backgroundMode,
+        0,
         ctrlOut,
       );
+      final result = _takeCStringAndFreeStatic(resultPtr);
+      print('Haskell Response: $result');
 
       _chatController = ctrlOut.value;
-      return _takeCStringAndFreeStatic(resultPtr);
+      return result;
     } finally {
       malloc.free(pathPtr);
-      malloc.free(keyPtr);
+      malloc.free(passPtr);
       malloc.free(confirmPtr);
       calloc.free(ctrlOut);
     }

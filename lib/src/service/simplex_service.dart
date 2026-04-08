@@ -28,18 +28,21 @@ class SimplexService {
       _appendLog('Starting SimpleX core initialization...');
 
       final docsDir = await getApplicationDocumentsDirectory();
-      final simplexDir = Directory('${docsDir.path}/simplex_data');
-      await simplexDir.create(recursive: true);
+      final path =
+          '${docsDir.path}/simplex_data_${DateTime.now().millisecondsSinceEpoch}';
+      final simplexDir = Directory(path);
+      simplexDir.createSync(recursive: true);
       _appendLog('Data directory: ${simplexDir.path}');
 
       final initResult = await _native.migrateInitKey(
         path: simplexDir.path,
-        key: '',
-        keepKey: false,
-        confirm: 'default',
-        backgroundMode: 0,
       );
       _appendLog('migrateInitKey: $initResult');
+
+      final normalized = initResult.toLowerCase();
+      if (normalized.contains('error') || normalized.contains('invalid')) {
+        throw Exception(initResult);
+      }
 
       _receivePort = ReceivePort();
       _eventSubscription = _receivePort!.listen(_handleEvent);
@@ -55,20 +58,21 @@ class SimplexService {
     }
   }
 
-  Future<void> sendTestCommand() async {
+  Future<String?> sendCommand(String cmd) async {
     if (!_isInitialized) {
       _appendLog('Core is not initialized. Press Init Core first.');
-      return;
+      return null;
     }
 
     try {
-      const cmd = '{"cmd":"api_version"}';
       _appendLog('> $cmd');
       final response = await _native.sendCommand(cmd);
       _appendLog('< $response');
+      return response;
     } catch (error, stackTrace) {
       _appendLog('sendCommand error: $error');
       _appendLog(stackTrace.toString());
+      return null;
     }
   }
 
@@ -90,6 +94,7 @@ class SimplexService {
   }
 
   void _appendLog(String line) {
+    print(line); // дублируем в stdout для отладки через терминал
     final updated = List<String>.from(logs.value)..add(line);
     logs.value = updated;
   }
