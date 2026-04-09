@@ -44,6 +44,7 @@ dependencies:
   video_thumbnail: ^0.5.3
   file_picker: ^8.1.2
   just_audio: ^0.9.39
+  archive: ^4.0.2
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.

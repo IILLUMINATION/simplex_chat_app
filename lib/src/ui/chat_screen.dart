@@ -17,6 +17,7 @@ import 'package:just_audio/just_audio.dart';
 
 import '../../main.dart';
 import '../service/simplex_service.dart';
+import '../stickers/sticker_store.dart';
 
 class ChatScreen extends ConsumerStatefulWidget {
   final String chatRef;
@@ -47,13 +48,23 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   Timer? _refreshDebounce;
   final AudioPlayer _audioPlayer = AudioPlayer();
   _AudioNowPlaying? _audioNowPlaying;
+  final StickerStore _stickerStore = StickerStore.instance;
+  bool _stickersLoaded = false;
 
   @override
   void initState() {
     super.initState();
     _loadMessages();
+    _loadStickers();
     _eventSub =
         ref.read(simplexServiceProvider).eventStream.listen(_handleEvent);
+  }
+
+  Future<void> _loadStickers() async {
+    await _stickerStore.load();
+    if (mounted) {
+      setState(() => _stickersLoaded = true);
+    }
   }
 
   Future<void> _loadMessages() async {
@@ -194,6 +205,152 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       );
     }
     setState(() => _sendingMedia = false);
+  }
+
+  Future<void> _sendSticker(StickerPack pack, StickerItem sticker) async {
+    if (_sendingMedia) return;
+    setState(() => _sendingMedia = true);
+    _PreviewPayload preview;
+    if (sticker.filePath.toLowerCase().endsWith('.webm')) {
+      final thumb = await vthumb.VideoThumbnail.thumbnailData(
+        video: sticker.filePath,
+        imageFormat: vthumb.ImageFormat.JPEG,
+        maxWidth: 160,
+        quality: 55,
+      );
+      final safeThumb = thumb ?? _tinyPreview();
+      preview = _compressPreview(
+        _PreviewPayload(bytes: safeThumb, mime: 'image/jpeg'),
+        maxBytes: 35000,
+      );
+    } else {
+      final bytes = File(sticker.filePath).readAsBytesSync();
+      preview = _compressPreview(_prepareStickerPreview(bytes), maxBytes: 35000);
+    }
+    final service = ref.read(simplexServiceProvider);
+    final result = await service.sendSticker(
+      chatRef: widget.chatRef,
+      filePath: sticker.filePath,
+      previewBytes: preview.bytes,
+      previewMime: preview.mime,
+      packId: pack.id,
+      stickerId: sticker.id,
+    );
+    if (result.ok) {
+      await _loadMessages();
+    } else if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            result.error == null
+                ? 'Не удалось отправить стикер'
+                : 'Не удалось отправить: ${result.error}',
+          ),
+        ),
+      );
+    }
+    setState(() => _sendingMedia = false);
+  }
+
+  void _openStickerPicker() {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (ctx) {
+        return _StickerPickerSheet(
+          packs: _stickerStore.packs,
+          onImport: () async {
+            final res = await FilePicker.platform.pickFiles(
+              type: FileType.custom,
+              allowedExtensions: ['sxpz', 'zip'],
+            );
+            if (res == null || res.files.isEmpty) return;
+            final path = res.files.single.path;
+            if (path == null) return;
+            final pack = await _stickerStore.importZip(path);
+            if (pack != null && mounted) {
+              setState(() {});
+            }
+          },
+          onCreate: () async {
+            final created = await _createStickerPack();
+            if (created != null && mounted) {
+              setState(() {});
+            }
+          },
+          onSend: (pack, item) {
+            Navigator.of(ctx).pop();
+            _sendSticker(pack, item);
+          },
+        );
+      },
+    );
+  }
+
+  Future<StickerPack?> _createStickerPack() async {
+    final nameCtrl = TextEditingController();
+    final idCtrl = TextEditingController();
+    final authorCtrl = TextEditingController();
+    StickerPack? created;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          title: const Text('Новый стикер‑пак'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: nameCtrl,
+                decoration: const InputDecoration(labelText: 'Название'),
+                onChanged: (v) {
+                  if (idCtrl.text.isEmpty) {
+                    idCtrl.text = _slugify(v);
+                  }
+                },
+              ),
+              TextField(
+                controller: idCtrl,
+                decoration: const InputDecoration(labelText: 'ID (латиница)'),
+              ),
+              TextField(
+                controller: authorCtrl,
+                decoration: const InputDecoration(labelText: 'Автор (необяз.)'),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Отмена'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Далее'),
+            ),
+          ],
+        );
+      },
+    );
+    final name = nameCtrl.text.trim();
+    final id = idCtrl.text.trim();
+    if (name.isEmpty || id.isEmpty) return null;
+    final res = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['webp', 'webm'],
+      allowMultiple: true,
+    );
+    if (res == null || res.files.isEmpty) return null;
+    final paths =
+        res.files.map((e) => e.path).whereType<String>().toList();
+    created = await _stickerStore.createPack(
+      packId: id,
+      name: name,
+      author: authorCtrl.text.trim().isEmpty ? null : authorCtrl.text.trim(),
+      filePaths: paths,
+    );
+    return created;
   }
 
   void _openAttachMenu() {
@@ -365,6 +522,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             (m.text.isEmpty) &&
             !next.images.any((e) => e.isVideo || e.isCircle) &&
             !m.images.any((e) => e.isVideo || e.isCircle) &&
+            !next.images.any((e) => e.isSticker) &&
+            !m.images.any((e) => e.isSticker) &&
             _closeInTime(m.time, next.time, const Duration(minutes: 5));
           if (!canGroup) break;
           group.add(next);
@@ -612,6 +771,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                       icon: const Icon(Icons.attach_file),
                     ),
                     IconButton(
+                      onPressed: _sendingMedia ? null : _openStickerPicker,
+                      icon: const Icon(Icons.emoji_emotions_outlined),
+                    ),
+                    IconButton(
                       onPressed: _sendingMedia ? null : _openCircleRecorder,
                       icon: const Icon(Icons.fiber_manual_record),
                     ),
@@ -675,6 +838,9 @@ class _MessageBubble extends StatelessWidget {
         message.images.first.isVideo &&
         message.images.first.isCircle &&
         text.isEmpty;
+    final isStickerOnly = message.images.length == 1 &&
+        message.images.first.isSticker &&
+        text.isEmpty;
     final bubbleColor = isVideoOnly
         ? Colors.transparent
         : (fromMe
@@ -688,7 +854,7 @@ class _MessageBubble extends StatelessWidget {
       alignment: fromMe ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
         margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 6),
-        padding: isVideoOnly
+        padding: isVideoOnly || isStickerOnly
             ? const EdgeInsets.all(2)
             : const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         constraints: BoxConstraints(
@@ -702,7 +868,7 @@ class _MessageBubble extends StatelessWidget {
             bottomLeft: Radius.circular(fromMe ? 18 : 6),
             bottomRight: Radius.circular(fromMe ? 6 : 18),
           ),
-          boxShadow: isVideoOnly
+          boxShadow: (isVideoOnly || isStickerOnly)
               ? const []
               : [
                   BoxShadow(
@@ -725,6 +891,9 @@ class _MessageBubble extends StatelessWidget {
               const SizedBox(height: 6),
             ],
             if (message.images.isNotEmpty) ...[
+              if (isStickerOnly)
+                _StickerView(image: message.images.first)
+              else
               _MediaGrid(
                 images: message.images,
                 fromMe: message.fromMe,
@@ -880,23 +1049,32 @@ class _AudioBubble extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        IconButton(
-          onPressed: audio.filePath == null ? null : onPlay,
-          icon: const Icon(Icons.play_arrow),
+        InkResponse(
+          onTap: audio.filePath == null ? null : onPlay,
+          radius: 20,
+          child: Container(
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(
+              color: theme.colorScheme.primaryContainer,
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              Icons.play_arrow,
+              color: theme.colorScheme.onPrimaryContainer,
+              size: 18,
+            ),
+          ),
         ),
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              audio.title,
-              style: theme.textTheme.labelLarge,
-            ),
-            Text(
-              'Audio file',
-              style: theme.textTheme.bodySmall
-                  ?.copyWith(color: theme.colorScheme.outline),
-            ),
-          ],
+        const SizedBox(width: 10),
+        SizedBox(
+          width: 180,
+          child: Text(
+            audio.title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.labelLarge,
+          ),
         ),
       ],
     );
@@ -943,6 +1121,137 @@ class _AudioNowPlaying {
     required this.filePath,
     required this.title,
   });
+}
+
+class _StickerPickerSheet extends StatefulWidget {
+  final List<StickerPack> packs;
+  final VoidCallback onImport;
+  final VoidCallback onCreate;
+  final void Function(StickerPack pack, StickerItem item) onSend;
+
+  const _StickerPickerSheet({
+    required this.packs,
+    required this.onImport,
+    required this.onCreate,
+    required this.onSend,
+  });
+
+  @override
+  State<_StickerPickerSheet> createState() => _StickerPickerSheetState();
+}
+
+class _StickerPickerSheetState extends State<_StickerPickerSheet> {
+  int _selected = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    final packs = widget.packs;
+    final theme = Theme.of(context);
+    return SafeArea(
+      child: SizedBox(
+        height: MediaQuery.of(context).size.height * 0.55,
+        child: Column(
+          children: [
+            if (packs.isEmpty)
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  children: [
+                    Text(
+                      'Стикеры не установлены',
+                      style: theme.textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        ElevatedButton.icon(
+                          onPressed: widget.onImport,
+                          icon: const Icon(Icons.upload_file),
+                          label: const Text('Импортировать'),
+                        ),
+                        const SizedBox(width: 12),
+                        OutlinedButton.icon(
+                          onPressed: widget.onCreate,
+                          icon: const Icon(Icons.add),
+                          label: const Text('Создать'),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              )
+            else
+              SizedBox(
+                height: 54,
+                child: ListView.builder(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: packs.length + 2,
+                  itemBuilder: (context, index) {
+                    if (index == packs.length) {
+                      return IconButton(
+                        onPressed: widget.onImport,
+                        icon: const Icon(Icons.add),
+                      );
+                    }
+                    if (index == packs.length + 1) {
+                      return IconButton(
+                        onPressed: widget.onCreate,
+                        icon: const Icon(Icons.create),
+                      );
+                    }
+                    final p = packs[index];
+                    final selected = index == _selected;
+                    return GestureDetector(
+                      onTap: () => setState(() => _selected = index),
+                      child: Container(
+                        margin:
+                            const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+                        padding: const EdgeInsets.all(6),
+                        decoration: BoxDecoration(
+                          color: selected
+                              ? theme.colorScheme.primaryContainer
+                              : theme.colorScheme.surfaceContainerHigh,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: p.coverPath != null
+                            ? Image.file(File(p.coverPath!))
+                            : Center(
+                                child: Text(
+                                  p.name.characters.first,
+                                  style: theme.textTheme.labelLarge,
+                                ),
+                              ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            const Divider(height: 1),
+            if (packs.isNotEmpty)
+              Expanded(
+                child: GridView.builder(
+                  padding: const EdgeInsets.all(12),
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 4,
+                    crossAxisSpacing: 8,
+                    mainAxisSpacing: 8,
+                  ),
+                  itemCount: packs[_selected].stickers.length,
+                  itemBuilder: (context, index) {
+                    final s = packs[_selected].stickers[index];
+                    return GestureDetector(
+                      onTap: () => widget.onSend(packs[_selected], s),
+                      child: _StickerThumb(filePath: s.filePath),
+                    );
+                  },
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 _UiMessage? _parseChatItem(Map<String, dynamic> msg) {
@@ -994,6 +1303,8 @@ _UiMessage? _parseChatItem(Map<String, dynamic> msg) {
     final fileStatusType = fileStatus?['type'] as String?;
     final fileName = fileObj?['fileName'] as String?;
     final isCircle = (fileName != null && fileName.startsWith('circle_'));
+    final isSticker = fileName != null && fileName.startsWith('st__');
+    final isWebm = fileName != null && fileName.toLowerCase().endsWith('.webm');
     final audioItem = _parseAudio(fileName, filePath);
     final decoded = _decodeImage(imageData);
     final hasLocalFile = filePath != null && File(filePath).existsSync();
@@ -1006,7 +1317,19 @@ _UiMessage? _parseChatItem(Map<String, dynamic> msg) {
         fileStatusType: fileStatusType,
         isVideo: true,
         isCircle: isCircle,
+        isSticker: isSticker,
+        isWebm: isWebm,
         durationSec: durationSec,
+      ));
+    } else if (msgType == 'image') {
+      images.add(_UiImage(
+        filePath: hasLocalFile ? filePath : null,
+        bytes: decoded,
+        fileId: fileId,
+        fileSize: fileSize,
+        fileStatusType: fileStatusType,
+        isSticker: isSticker,
+        isWebm: isWebm,
       ));
     } else {
       if (hasLocalFile) {
@@ -1026,6 +1349,21 @@ _UiMessage? _parseChatItem(Map<String, dynamic> msg) {
           isVideo: false,
         ));
       }
+    }
+    if ((msgType == 'image' || msgType == 'video') &&
+        isSticker &&
+        images.isEmpty) {
+      images.add(_UiImage(
+        filePath: hasLocalFile ? filePath : null,
+        bytes: decoded,
+        fileId: fileId,
+        fileSize: fileSize,
+        fileStatusType: fileStatusType,
+        isVideo: msgType == 'video',
+        isSticker: true,
+        isWebm: isWebm,
+        durationSec: durationSec,
+      ));
     }
     if (msgType == 'file' && audioItem != null) {
       return _UiMessage(
@@ -1146,7 +1484,9 @@ class _MediaGrid extends StatelessWidget {
       ),
       itemBuilder: (context, index) {
         final img = images[index];
-        final child = img.isVideo && img.isCircle
+        final child = img.isSticker
+            ? _StickerView(image: img)
+            : img.isVideo && img.isCircle
             ? _VideoCircle(
                 image: img,
               )
@@ -1200,10 +1540,18 @@ class _MediaGrid extends StatelessWidget {
 
   Widget _buildImage(_UiImage img) {
     if (img.filePath != null) {
-      return Image.file(File(img.filePath!), fit: BoxFit.cover);
+      return Image.file(
+        File(img.filePath!),
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => const ColoredBox(color: Colors.black12),
+      );
     }
     if (img.bytes != null) {
-      return Image.memory(img.bytes!, fit: BoxFit.cover);
+      return Image.memory(
+        img.bytes!,
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => const ColoredBox(color: Colors.black12),
+      );
     }
     return const SizedBox.shrink();
   }
@@ -1340,9 +1688,17 @@ class _GalleryViewState extends State<_GalleryView> {
           final img = widget.images[index];
           return InteractiveViewer(
             child: Center(
-              child: img.filePath != null
-                  ? Image.file(File(img.filePath!))
-                  : Image.memory(img.bytes!),
+                child: img.filePath != null
+                  ? Image.file(
+                      File(img.filePath!),
+                      errorBuilder: (_, __, ___) =>
+                          const ColoredBox(color: Colors.black12),
+                    )
+                  : Image.memory(
+                      img.bytes!,
+                      errorBuilder: (_, __, ___) =>
+                          const ColoredBox(color: Colors.black12),
+                    ),
             ),
           );
         },
@@ -1618,6 +1974,124 @@ class _VideoThumbRect extends StatelessWidget {
               ),
             ),
         ],
+      ),
+    );
+  }
+}
+
+class _StickerView extends StatelessWidget {
+  final _UiImage image;
+
+  const _StickerView({required this.image});
+
+  @override
+  Widget build(BuildContext context) {
+    const size = 140.0;
+    Widget child;
+    if (image.isWebm && image.filePath != null) {
+      child = _StickerWebm(filePath: image.filePath!);
+    } else if (image.filePath != null) {
+      child = Image.file(
+        File(image.filePath!),
+        fit: BoxFit.contain,
+        errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+      );
+    } else if (image.bytes != null) {
+      child = Image.memory(
+        image.bytes!,
+        fit: BoxFit.contain,
+        errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+      );
+    } else {
+      child = const SizedBox.shrink();
+    }
+    return SizedBox(
+      width: size,
+      height: size,
+      child: child,
+    );
+  }
+}
+
+class _StickerThumb extends StatelessWidget {
+  final String filePath;
+
+  const _StickerThumb({required this.filePath});
+
+  @override
+  Widget build(BuildContext context) {
+    if (filePath.toLowerCase().endsWith('.webm')) {
+      return FutureBuilder<Uint8List?>(
+        future: vthumb.VideoThumbnail.thumbnailData(
+          video: filePath,
+          imageFormat: vthumb.ImageFormat.JPEG,
+          maxWidth: 200,
+          quality: 60,
+        ),
+        builder: (context, snap) {
+          final data = snap.data;
+          if (data == null) {
+            return const ColoredBox(color: Colors.black12);
+          }
+          return Image.memory(
+            data,
+            fit: BoxFit.contain,
+            errorBuilder: (_, __, ___) => const ColoredBox(color: Colors.black12),
+          );
+        },
+      );
+    }
+    return Image.file(
+      File(filePath),
+      fit: BoxFit.contain,
+      errorBuilder: (_, __, ___) => const ColoredBox(color: Colors.black12),
+    );
+  }
+}
+
+class _StickerWebm extends StatefulWidget {
+  final String filePath;
+
+  const _StickerWebm({required this.filePath});
+
+  @override
+  State<_StickerWebm> createState() => _StickerWebmState();
+}
+
+class _StickerWebmState extends State<_StickerWebm> {
+  VideoPlayerController? _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = VideoPlayerController.file(File(widget.filePath))
+      ..setLooping(true)
+      ..setVolume(0)
+      ..initialize().then((_) {
+        if (!mounted) return;
+        setState(() {});
+        _controller?.play();
+      });
+  }
+
+  @override
+  void dispose() {
+    _controller?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ctrl = _controller;
+    if (ctrl == null || !ctrl.value.isInitialized) {
+      return const SizedBox.shrink();
+    }
+    return FittedBox(
+      fit: BoxFit.contain,
+      child: SizedBox(
+        width: ctrl.value.size.width,
+        height: ctrl.value.size.height,
+        child: VideoPlayer(ctrl),
       ),
     );
   }
@@ -1915,6 +2389,8 @@ class _UiImage {
   final String? fileStatusType;
   final bool isVideo;
   final bool isCircle;
+  final bool isSticker;
+  final bool isWebm;
   final int? durationSec;
   const _UiImage({
     this.bytes,
@@ -1924,6 +2400,8 @@ class _UiImage {
     this.fileStatusType,
     this.isVideo = false,
     this.isCircle = false,
+    this.isSticker = false,
+    this.isWebm = false,
     this.durationSec,
   });
 
@@ -1955,6 +2433,46 @@ Uint8List _prepareCirclePreview(Uint8List input) {
   }
 }
 
+_PreviewPayload _prepareStickerPreview(Uint8List input) {
+  try {
+    final decoded = img.decodeImage(input);
+    if (decoded == null) {
+      return _PreviewPayload(bytes: input, mime: 'image/jpeg');
+    }
+    final resized = img.copyResize(decoded, width: 160);
+    final jpg = Uint8List.fromList(img.encodeJpg(resized, quality: 60));
+    return _PreviewPayload(bytes: jpg, mime: 'image/jpeg');
+  } catch (_) {
+    return _PreviewPayload(bytes: input, mime: 'image/jpeg');
+  }
+}
+
+_PreviewPayload _compressPreview(_PreviewPayload input, {int maxBytes = 35000}) {
+  if (input.bytes.length <= maxBytes) return input;
+  try {
+    final decoded = img.decodeImage(input.bytes);
+    if (decoded == null) return _PreviewPayload(bytes: _tinyPreview(), mime: 'image/jpeg');
+    int size = 140;
+    int quality = 55;
+    Uint8List out = input.bytes;
+    while (out.length > maxBytes && size >= 64) {
+      final resized = img.copyResize(decoded, width: size);
+      out = Uint8List.fromList(img.encodeJpg(resized, quality: quality));
+      size -= 16;
+      quality = (quality - 5).clamp(30, 90);
+    }
+    return _PreviewPayload(bytes: out, mime: 'image/jpeg');
+  } catch (_) {
+    return _PreviewPayload(bytes: _tinyPreview(), mime: 'image/jpeg');
+  }
+}
+
+Uint8List _tinyPreview() {
+  final img1 = img.Image(width: 2, height: 2);
+  img.fill(img1, color: img.ColorRgba8(136, 136, 136, 255));
+  return Uint8List.fromList(img.encodeJpg(img1, quality: 50));
+}
+
 String _chatRefFromInfo(Map<String, dynamic> chatInfo) {
   final type = chatInfo['type'] as String?;
   if (type == 'direct') {
@@ -1975,6 +2493,12 @@ String _chatRefFromInfo(Map<String, dynamic> chatInfo) {
     if (connId != null) return '<@$connId';
   }
   return '';
+}
+
+String _slugify(String input) {
+  final lower = input.toLowerCase();
+  final cleaned = lower.replaceAll(RegExp(r'[^a-z0-9]+'), '_');
+  return cleaned.replaceAll(RegExp(r'^_+|_+$'), '');
 }
 
 

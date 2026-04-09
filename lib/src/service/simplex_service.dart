@@ -354,6 +354,58 @@ class SimplexService {
     }
   }
 
+  Future<SendResult> sendSticker({
+    required String chatRef,
+    required String filePath,
+    required Uint8List previewBytes,
+    required String previewMime,
+    required String packId,
+    required String stickerId,
+  }) async {
+    String pathToSend = filePath;
+    try {
+      final tmp = await getTemporaryDirectory();
+      final ts = DateTime.now().millisecondsSinceEpoch;
+      final ext = filePath.toLowerCase().endsWith('.webp') ? 'webp' : 'webp';
+      final target =
+          File('${tmp.path}/st__${packId}__${stickerId}__$ts.$ext');
+      final src = File(filePath);
+      if (await src.exists()) {
+        await src.copy(target.path);
+        pathToSend = target.path;
+      }
+    } catch (_) {
+      pathToSend = filePath;
+    }
+
+    final isWebm = filePath.toLowerCase().endsWith('.webm');
+    final payload = {
+      'filePath': pathToSend,
+      'msgContent': {
+        'type': isWebm ? 'video' : 'image',
+        'text': '',
+        'image': 'data:$previewMime;base64,${base64Encode(previewBytes)}',
+        if (isWebm) 'duration': 0,
+      },
+    };
+    final jsonStr = _jsonCompact([payload]);
+    final cmd = '/_send $chatRef json $jsonStr';
+    final resp = await sendCommand(cmd);
+    if (resp == null) {
+      return const SendResult(ok: false, error: 'no response');
+    }
+    try {
+      final json = Map<String, dynamic>.from(_decodeJson(resp));
+      if (json['result'] != null) return const SendResult(ok: true);
+      if (json['error'] != null) {
+        return SendResult(ok: false, error: _jsonCompact(json['error']));
+      }
+      return const SendResult(ok: false, error: 'unknown response');
+    } catch (_) {
+      return const SendResult(ok: false, error: 'parse error');
+    }
+  }
+
   Future<bool> receiveFile(
     int fileId, {
     bool approvedRelays = true,
