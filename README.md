@@ -1,17 +1,341 @@
-# simplex_chat_app
+# 🟢 SimpleX Chat Client — Custom Flutter Edition
 
-A new Flutter project.
+> Приватный мессенджер без серверов, без ID, без компромиссов. Кастомный клиент с прямым FFI-доступом к ядру SimpleX.
 
-## Getting Started
+[![Flutter](https://img.shields.io/badge/Flutter-3.11+-02569B?logo=flutter&logoColor=white)](https://flutter.dev)
+[![Dart](https://img.shields.io/badge/Dart-3.11+-0175C2?logo=dart&logoColor=white)](https://dart.dev)
+[![License: AGPL](https://img.shields.io/badge/License-AGPL--3.0-green.svg)](https://www.gnu.org/licenses/agpl-3.0)
+[![Platform](https://img.shields.io/badge/Platform-Android-3DDC84?logo=android)](https://www.android.com)
+[![SimpleX](https://img.shields.io/badge/Protocol-SimpleX-6B4CFF)](https://simplex.chat)
 
-This project is a starting point for a Flutter application.
+---
 
-A few resources to get you started if this is your first Flutter project:
+## 📋 Оглавление
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+- [О проекте](#-о-проекте)
+- [Ключевые преимущества](#-ключевые-преимущества)
+- [Функции](#-функции)
+- [Архитектура](#-архитектура)
+- [Стек технологий](#-стек-технологий)
+- [Установка](#-установка)
+- [Сборка](#-сборка)
+- [Структура проекта](#-структура-проекта)
+- [Платформы](#-платформы)
+- [Известные ограничения](#-известные-ограничения)
+- [Вклад в проект](#-вклад-в-проект)
+- [Лицензия](#-лицензия)
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+---
+
+## 🚀 О проекте
+
+Это **кастомный клиент SimpleX Chat**, написанный на Flutter с **прямым FFI-доступом** к нативному ядру SimpleX (`libsimplex.so`). В отличие от стандартного клиента, который работает через REST API или SDK, этот клиент вызывает Haskell-ядро напрямую через `dart:ffi`, минуя все сетевые прослойки.
+
+**Результат?** Минимальные задержки, полный контроль над взаимодействием с протоколом и возможность кастомизации, недоступная при использовании официального SDK.
+
+---
+
+## ✨ Ключевые преимущества
+
+### ⚡ Прямой FFI-вызов ядра
+
+| Параметр | Оригинальный клиент (через API/SDK) | Этот клиент (FFI) |
+|:--------:|:-----------------------------------:|:-----------------:|
+ | Вызовы | Через IPC / HTTP-слой | Напрямую в `dart:ffi` |
+| Задержка | +оверхед IPC/сериализации | Минимальная |
+| Зависимости | Внешний процесс/сервис | Встроенное ядро |
+| Контроль | Ограничен публичным API | Полный доступ к командам |
+
+### 🎨 Уникальные функции, отсутствующие в оригинале
+
+| Функция | Описание |
+|---------|----------|
+| 🔴 **Круглые видеосообщения** | Запись и воспроизведение «кружочков» в стиле Telegram — с прогресс-кольцом, перемоткой жестом и анимацией пульсации |
+| 🖼 **Система стикеров** | Импорт `.sxpz`/`.zip` паков, создание своих паков, анимированные `.webm` стикеры с автосжатием превью |
+| 🎨 **4 темы оформления** | Material, Nord, AMOLED (чистый чёрный), Solarized — с переключением светлой/тёмной/системной |
+| 🌐 **Двуязычный интерфейс** | Русский 🇷🇺 + English 🇬🇧 — легковесная локализация без ARB-файлов |
+| 🐛 **Debug-консоль** | Прямой ввод JSON-команд к ядру SimpleX в реальном времени с лог-стримом |
+| 🖼 **HD-загрузка с контролем** | Переключатель качества изображений с предупреждением о стабильности |
+| 📎 **Мини-плеер аудио** | Встроенный плеер для голосовых сообщений прямо в чате |
+| 🗂 **Медиа-галерея** | Просмотр всех медиа чата с группировкой изображений |
+
+### 🏗 Архитектурные преимущества
+
+```
+┌─────────────────────────────────────────────┐
+│               Flutter UI (Material 3)        │
+│  ┌───────────┬───────────┬──────────────┐   │
+│  │  Чаты     │ Коннект   │  Профиль     │   │
+│  └───────────┴───────────┴──────────────┘   │
+├─────────────────────────────────────────────┤
+│         Riverpod State Management            │
+│  (тема · локаль · профиль · сервис)         │
+├─────────────────────────────────────────────┤
+│        SimplexService (бизнес-логика)       │
+│  ┌─────────────────────────────────────┐    │
+│  │  Event Loop (Isolate)               │    │
+│  │  chat_recv_msg_wait ←→ SendPort     │    │
+│  └─────────────────────────────────────┘    │
+├─────────────────────────────────────────────┤
+│      FFI Layer (dart:ffi + ffigen)         │
+│  simplex_native.dart → libsimplex.so       │
+├─────────────────────────────────────────────┤
+│       Haskell SimpleX Core (C API)          │
+│  hs_init · chat_send_cmd · chat_recv_msg    │
+└─────────────────────────────────────────────┘
+```
+
+---
+
+## 📦 Функции
+
+### 💬 Мессенджер
+
+| Возможность | Статус |
+|------------|:------:|
+| Текстовые сообщения | ✅ |
+| Отправка изображений (мульти-выбор) | ✅ |
+| Видео-сообщения | ✅ |
+| Голосовые сообщения | ✅ |
+| Файлы любого типа | ✅ |
+| Круглые видеосообщения | ✅ |
+| HD-загрузка изображений | ✅ |
+| Автоматическая загрузка медиа | ✅ |
+| Медиа-галерея чата | ✅ |
+| Группировка изображений | ✅ |
+| Стикеры (статичные + анимированные) | ✅ |
+| Создание стикер-паков | ✅ |
+| Мини-плеер аудио | ✅ |
+
+### 👤 Профили и контакты
+
+| Возможность | Статус |
+|------------|:------:|
+| Создание профиля (имя, полное имя, био) | ✅ |
+| Переключение между профилями | ✅ |
+| Удаление профиля | ✅ |
+| Подключение по SMP-ссылке (`smp://...`) | ✅ |
+| Генерация ссылки для шаринга | ✅ |
+| Принятие/отклонение запросов контакта | ✅ |
+| Статус ожидающих контактов | ✅ |
+
+### 🎨 Интерфейс
+
+| Возможность | Статус |
+|------------|:------:|
+| Material 3 дизайн | ✅ |
+| 4 темы: Material / Nord / AMOLED / Solarized | ✅ |
+| Светлая / Тёмная / Системная | ✅ |
+| Русский + English | ✅ |
+| Pull-to-refresh списка чатов | ✅ |
+| Бейджи непрочитанных | ✅ |
+| Превью последнего сообщения | ✅ |
+| Аватары контактов | ✅ |
+| Debug-консоль с сырыми командами | ✅ |
+| Градиентный фон с паттерном | ✅ |
+
+---
+
+## 🏗 Архитектура
+
+### FFI-интеграция
+
+Клиент использует `ffigen` для генерации Dart-биндингов к C API SimpleX ядра:
+
+```c
+// native/simplex.h — экспортируемые функции
+hs_init              → Инициализация Haskell RTS
+chat_migrate_init_key → Инициализация/миграция ядра
+chat_send_cmd_retry  → Отправка JSON-команды
+chat_recv_msg_wait   → Блокирующий приём событий
+chat_encrypt_media   → Шифрование медиа
+chat_decrypt_media   → Дешифровка медиа
+chat_write_file      → Запись файла через ядро
+chat_read_file       → Чтение файла через ядро
+```
+
+### Event Loop
+
+События от ядра принимаются в **выделенном Dart Isolate**, чтобы не блокировать UI-поток:
+
+```dart
+// simplex_event_loop — изолированный цикл событий
+chat_recv_msg_wait(chat_ctrl) → SendPort → ReceivePort → UI
+```
+
+### State Management
+
+- **Riverpod** — управление состоянием
+- **SharedPreferences** — персистентность (тема, локаль, профиль)
+- **ValueNotifier** — реактивные логи и статусы
+
+---
+
+## 🛠 Стек технологий
+
+| Категория | Технология |
+|-----------|------------|
+| **Фреймворк** | Flutter 3.11+, Dart 3.11+ |
+| **State Management** | Flutter Riverpod 2.6.1 |
+| **FFI** | `ffi` 2.1.4, `ffigen` 19.1.0 |
+| **Хранение** | `shared_preferences` 2.5.3 |
+| **Изображения** | `image_picker`, `image`, `video_thumbnail` |
+| **Камера** | `camera` 0.11.1 |
+| **Видео** | `video_player` 2.9.2 |
+| **Аудио** | `just_audio` 0.9.39 |
+| **Файлы** | `file_picker` 8.1.2 |
+| **Архивы** | `archive` 4.0.2 |
+| **Локализация** | `flutter_localizations`, кастомная реализация |
+
+---
+
+## 📥 Установка
+
+### Требования
+
+- Flutter SDK **3.11+**
+- Dart SDK **3.11+**
+- Android NDK **28.2.13676358** (для сборки `libsimplex.so`)
+- Скомпилированная библиотека `libsimplex.so` (Haskell SimpleX core)
+
+### Шаги
+
+```bash
+# 1. Клонировать репозиторий
+git clone https://github.com/your-username/simplex_chat_app.git
+cd simplex_chat_app
+
+# 2. Установить зависимости
+flutter pub get
+
+# 3. Разместить libsimplex.so
+# Поместите скомпилированную libsimplex.so в:
+#   android/app/src/main/jniLibs/arm64-v8a/
+#   android/app/src/main/jniLibs/armeabi-v7a/
+
+# 4. Запустить приложение
+flutter run
+```
+
+---
+
+## 🔨 Сборка
+
+### Android (APK)
+
+```bash
+flutter build apk --release
+```
+
+### Android (App Bundle)
+
+```bash
+flutter build appbundle --release
+```
+
+### Генерация FFI-биндингов
+
+```bash
+# Убедитесь, что native/simplex.h актуален
+dart run ffigen --config ffigen.yaml
+```
+
+### Настройка NDK
+
+Версия NDK зафиксирована в `android/app/build.gradle.kts`:
+
+```kotlin
+ndkVersion = "28.2.13676358"
+```
+
+---
+
+## 📁 Структура проекта
+
+```
+simplex_chat_app/
+├── lib/
+│   ├── main.dart                          # Точка входа, ProviderScope
+│   └── src/
+│       ├── ffi/
+│       │   ├── simplex_bindings.dart      # Автогенерация (ffigen)
+│       │   └── simplex_native.dart        # FFI-обёртка, Event Loop
+│       ├── service/
+│       │   └── simplex_service.dart       # Бизнес-логика, команды
+│       ├── ui/
+│       │   ├── home_screen.dart           # Навигация: Чаты / Коннект / Профиль
+│       │   ├── chats_screen.dart          # Список чатов, запросы
+│       │   ├── chat_screen.dart           # Экран чата (~2500 строк)
+│       │   ├── connect_screen.dart        # Подключение по ссылке
+│       │   ├── create_profile_screen.dart # Создание профиля
+│       │   ├── profile_screen.dart        # Профиль, мультипрофиль
+│       │   ├── settings_screen.dart       # Настройки (тема, локаль)
+│       │   └── debug_screen.dart          # Debug-консоль
+│       ├── providers/
+│       │   ├── persistent_store.dart      # Модели данных
+│       │   ├── theme_provider.dart        # Тема (4 стиля × 3 режима)
+│       │   └── locale_provider.dart       # Локаль (en/ru)
+│       ├── stickers/
+│       │   └── sticker_store.dart         # Стикер-паки
+│       └── localization/
+│           └── app_localizations.dart     # en/ru переводы
+├── native/
+│   └── simplex.h                          # C API заголовки
+├── android/                               # Android-проект
+├── ios/                                   # iOS-заготовка
+├── linux/                                 # Linux-заготовка
+├── macos/                                 # macOS-заготовка
+├── ffigen.yaml                            # Конфигурация ffigen
+└── pubspec.yaml                           # Зависимости
+```
+
+---
+
+## 🖥 Платформы
+
+| Платформа | Статус | Примечание |
+|-----------|:------:|------------|
+| **Android** | 🟢 Работает | FFI загружает `libsimplex.so` |
+| **iOS** | 🟡 Заготовка | Нет FFI-интеграции |
+| **Linux** | 🟡 Заготовка | Нет нативной библиотеки |
+| **macOS** | 🟡 Заготовка | Нет нативной библиотеки |
+| **Windows** | 🔴 Не поддерживается | Не реализовано |
+| **Web** | 🔴 Невозможно | `dart:ffi` недоступен в вебе |
+
+---
+
+## ⚠️ Известные ограничения
+
+| Ограничение | Описание |
+|-------------|----------|
+| **FFI только на Android** | `SimplexNative` бросает `UnsupportedError` на не-Android платформах |
+| **Групповые чаты** | UI готов, но обработка ограничена («This chat is not ready yet») |
+| **Нет QR-сканера** | Подключение только через ручной ввод/вставку `smp://` ссылки |
+| **Нет пуш-уведомлений** | Event Loop — polling через `chat_recv_msg_wait`; нет FCM/APNs |
+| **HD-приём нестабилен** | Предупреждение: «can crash native core» для больших файлов |
+| **Share-кнопка** | TODO: не реализован шаринг ссылки |
+
+---
+
+## 🤝 Вклад в проект
+
+Pull Request'ы приветствуются! Для крупных изменений:
+
+1. Откройте issue для обсуждения
+2. Создайте feature-branch
+3. Внесите изменения
+4. Откройте PR с описанием
+
+---
+
+## 📄 Лицензия
+
+Этот проект распространяется под лицензией **AGPL-3.0**. См. файл [LICENSE](LICENSE) для подробностей.
+
+SimpleX Chat и протокол SimpleX являются проектами с открытым исходным кодом, разработанными [SimpleX Chat Ltd.](https://simplex.chat)
+
+---
+
+<p align="center">
+  <sub>Сделано с 💚 на Flutter & Dart FFI</sub>
+</p>
