@@ -4,7 +4,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'src/localization/app_localizations.dart';
 import 'src/providers/locale_provider.dart';
-import 'src/providers/persistent_store.dart';
 import 'src/providers/theme_provider.dart';
 import 'src/service/simplex_service.dart';
 import 'src/ui/home_screen.dart';
@@ -50,9 +49,4 @@ class SimplexApp extends ConsumerWidget {
       home: const HomeScreen(),
     );
   }
-}
-
-/// Force rebuild after locale change
-void restartApp(WidgetRef ref) {
-  ref.invalidate(persistedLocaleProvider);
 }

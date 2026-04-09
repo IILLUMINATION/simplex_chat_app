@@ -1,27 +1,7 @@
 import 'dart:convert';
-
+import 'dart:typed_data';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-
-final _prefs = SharedPreferences.getInstance();
-
-// ===== Prefs helpers =====
-Future<T?> _read<T>(String key, T Function(Map<String, dynamic>) fromJson) async {
-  final prefs = await _prefs;
-  final raw = prefs.getString(key);
-  if (raw == null) return null;
-  return fromJson(jsonDecode(raw) as Map<String, dynamic>);
-}
-
-Future<void> _write(String key, Map<String, dynamic> json) async {
-  final prefs = await _prefs;
-  await prefs.setString(key, jsonEncode(json));
-}
-
-Future<void> _remove(String key) async {
-  final prefs = await _prefs;
-  await prefs.remove(key);
-}
 
 // ===== Data Classes =====
 class ThemeConfigData {
@@ -46,61 +26,247 @@ class AppLocaleData {
       AppLocaleData(locale: j['locale'] as String? ?? 'ru');
 }
 
+/// Data class representing a user profile
 class ProfileData {
   const ProfileData({
     required this.displayName,
     this.fullName = '',
     this.shortDescr = '',
     this.userId,
+    this.agentUserId,
+    this.userContactId,
+    this.localDisplayName,
   });
   final String displayName;
   final String fullName;
   final String shortDescr;
   final int? userId;
+  final String? agentUserId;
+  final int? userContactId;
+  final String? localDisplayName;
+
   Map<String, dynamic> toJson() => {
         'displayName': displayName,
         'fullName': fullName,
         'shortDescr': shortDescr,
         if (userId != null) 'userId': userId,
+        if (agentUserId != null) 'agentUserId': agentUserId,
+        if (userContactId != null) 'userContactId': userContactId,
+        if (localDisplayName != null) 'localDisplayName': localDisplayName,
       };
+
   factory ProfileData.fromJson(Map<String, dynamic> j) => ProfileData(
-        displayName: j['displayName'] as String,
+        displayName: j['displayName'] as String? ?? '',
         fullName: j['fullName'] as String? ?? '',
         shortDescr: j['shortDescr'] as String? ?? '',
         userId: j['userId'] as int?,
+        agentUserId: j['agentUserId'] as String?,
+        userContactId: j['userContactId'] as int?,
+        localDisplayName: j['localDisplayName'] as String?,
       );
 }
 
+/// Parsed chat item from /_get chats response
+class ChatPreview {
+  const ChatPreview({
+    required this.chatRef,
+    required this.chatType,
+    this.displayName = '',
+    this.lastMessage = '',
+    this.timestamp,
+    this.unreadCount = 0,
+    this.chatId,
+    this.contactStatus,
+    this.contactUsed,
+    this.avatarImage,
+  });
+
+  final String chatRef; // e.g. "@1" or "#1"
+  final String chatType; // 'contact' or 'group'
+  final String displayName;
+  final String lastMessage;
+  final int? timestamp;
+  final int unreadCount;
+  final int? chatId;
+  final String? contactStatus;
+  final bool? contactUsed;
+  final Uint8List? avatarImage;
+
+  factory ChatPreview.fromJson(Map<String, dynamic> json) {
+    final chatInfo = json['chatInfo'] as Map<String, dynamic>? ?? {};
+    final chatType = chatInfo['type'] as String?;
+    final contact = chatInfo['contact'] as Map<String, dynamic>?;
+    final group = chatInfo['group'] as Map<String, dynamic>?;
+    final contactRequest =
+        chatInfo['contactRequest'] as Map<String, dynamic>?;
+    final chatItems = json['chatItems'] as List?;
+
+    String lastMsg = '';
+    int? ts;
+    if (chatItems != null && chatItems.isNotEmpty) {
+      final lastItem = chatItems.first as Map<String, dynamic>;
+      final content = lastItem['content'] as Map<String, dynamic>?;
+      final text = content?['text'] as String?;
+      if (text != null) lastMsg = text;
+      ts = lastItem['timeStamp'] as int?;
+    }
+
+    String type;
+    String name = '';
+    int? id;
+    String? contactStatus;
+    bool? contactUsed;
+    Uint8List? avatar;
+
+    if (chatType == 'contactRequest' && contactRequest != null) {
+      type = 'contactRequest';
+      final profile = contactRequest['profile'] as Map<String, dynamic>?;
+      name = profile?['displayName'] as String? ??
+          contactRequest['localDisplayName'] as String? ??
+          '';
+      id = contactRequest['contactRequestId'] as int?;
+      final img = profile?['image'] as String?;
+      avatar = _decodeImage(img);
+    } else if (contact != null) {
+      type = 'contact';
+      name = contact['displayName'] as String? ??
+          contact['localDisplayName'] as String? ??
+          '';
+      id = contact['contactId'] as int?;
+      contactStatus = contact['contactStatus'] as String?;
+      contactUsed = contact['contactUsed'] as bool?;
+      final profile = contact['profile'] as Map<String, dynamic>?;
+      final img = profile?['image'] as String?;
+      avatar = _decodeImage(img);
+    } else if (group != null) {
+      type = 'group';
+      name = group['groupName'] as String? ??
+          group['localDisplayName'] as String? ??
+          '';
+      id = group['groupId'] as int?;
+    } else if (chatType == 'contactConnection') {
+      type = 'contactConnection';
+      name = 'Pending connection';
+    } else {
+      type = 'unknown';
+      name = '';
+    }
+
+    return ChatPreview(
+      chatRef: type == 'contactRequest'
+          ? '<@${id ?? '?'}'
+          : (type == 'group' ? '#${id ?? '?'}' : '@${id ?? '?'}'),
+      chatType: type,
+      displayName: name,
+      lastMessage: lastMsg,
+      timestamp: ts,
+      unreadCount: json['unreadCount'] as int? ?? 0,
+      chatId: id,
+      contactStatus: contactStatus,
+      contactUsed: contactUsed,
+      avatarImage: avatar,
+    );
+  }
+}
+
+Uint8List? _decodeImage(String? dataUri) {
+  if (dataUri == null || dataUri.isEmpty) return null;
+  final marker = 'base64,';
+  final idx = dataUri.indexOf(marker);
+  if (idx == -1) return null;
+  final b64 = dataUri.substring(idx + marker.length);
+  try {
+    return base64Decode(b64);
+  } catch (_) {
+    return null;
+  }
+}
+
+/// Parsed contact info
+class ContactInfo {
+  const ContactInfo({
+    required this.contactId,
+    this.displayName = '',
+    this.status = '',
+  });
+
+  final int contactId;
+  final String displayName;
+  final String status;
+
+  factory ContactInfo.fromJson(Map<String, dynamic> json) {
+    final contact = json['contact'] as Map<String, dynamic>? ?? {};
+    return ContactInfo(
+      contactId: json['contactId'] as int? ?? contact['contactId'] as int? ?? 0,
+      displayName: contact['displayName'] as String? ??
+          contact['localDisplayName'] as String? ??
+          '',
+      status: json['status'] as String? ?? '',
+    );
+  }
+}
+
+/// Parsed contact request info
+class ContactRequestPreview {
+  const ContactRequestPreview({
+    required this.contactRequestId,
+    required this.localDisplayName,
+    this.displayName = '',
+    this.fullName = '',
+    this.shortDescr = '',
+    this.contactId,
+    this.userContactLinkId,
+  });
+
+  final int contactRequestId;
+  final String localDisplayName;
+  final String displayName;
+  final String fullName;
+  final String shortDescr;
+  final int? contactId;
+  final int? userContactLinkId;
+
+  factory ContactRequestPreview.fromJson(Map<String, dynamic> json) {
+    final profile = json['profile'] as Map<String, dynamic>? ?? {};
+    return ContactRequestPreview(
+      contactRequestId: json['contactRequestId'] as int? ?? 0,
+      localDisplayName: json['localDisplayName'] as String? ?? '',
+      displayName: profile['displayName'] as String? ??
+          json['localDisplayName'] as String? ??
+          '',
+      fullName: profile['fullName'] as String? ?? '',
+      shortDescr: profile['shortDescr'] as String? ?? '',
+      contactId: json['contactId_'] as int?,
+      userContactLinkId: json['userContactLinkId_'] as int?,
+    );
+  }
+}
+
 // ===== Providers =====
-final persistedThemeProvider = FutureProvider<ThemeConfigData>((ref) async {
-  return await _read('theme_config', ThemeConfigData.fromJson) ??
-      const ThemeConfigData();
-});
-
-final persistedLocaleProvider = FutureProvider<AppLocaleData>((ref) async {
-  return await _read('app_locale', AppLocaleData.fromJson) ??
-      const AppLocaleData();
-});
-
 final persistedProfileProvider = FutureProvider<ProfileData?>((ref) async {
-  final prefs = await _prefs;
+  final prefs = await SharedPreferences.getInstance();
   if (!(prefs.getBool('profile_created') ?? false)) return null;
-  return _read('profile_data', ProfileData.fromJson);
+  final raw = prefs.getString('profile_data');
+  if (raw == null) return null;
+  return ProfileData.fromJson(jsonDecode(raw) as Map<String, dynamic>);
 });
-
-Future<void> saveThemeConfig(ThemeConfigData c) async =>
-    _write('theme_config', c.toJson());
-
-Future<void> saveAppLocale(AppLocaleData l) async =>
-    _write('app_locale', l.toJson());
 
 Future<void> saveProfileData(ProfileData d) async {
-  final prefs = await _prefs;
+  final prefs = await SharedPreferences.getInstance();
   await prefs.setBool('profile_created', true);
-  await _write('profile_data', d.toJson());
+  await prefs.setString('profile_data', jsonEncode(d.toJson()));
 }
 
 Future<void> clearProfileData() async {
-  await _remove('profile_created');
-  await _remove('profile_data');
+  final prefs = await SharedPreferences.getInstance();
+  await prefs.remove('profile_created');
+  await prefs.remove('profile_data');
+}
+
+Future<ProfileData?> loadProfileData() async {
+  final prefs = await SharedPreferences.getInstance();
+  if (!(prefs.getBool('profile_created') ?? false)) return null;
+  final raw = prefs.getString('profile_data');
+  if (raw == null) return null;
+  return ProfileData.fromJson(jsonDecode(raw) as Map<String, dynamic>);
 }

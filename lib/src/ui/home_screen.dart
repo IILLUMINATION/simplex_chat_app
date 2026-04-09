@@ -3,8 +3,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../main.dart';
 import '../localization/app_localizations.dart';
-import 'create_profile_screen.dart';
+import 'chats_screen.dart';
+import 'connect_screen.dart';
 import 'debug_screen.dart';
+import 'profile_screen.dart';
 import 'settings_screen.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
@@ -16,49 +18,62 @@ class HomeScreen extends ConsumerStatefulWidget {
 
 class _HomeScreenState extends ConsumerState<HomeScreen> {
   int _currentIndex = 0;
+  bool _coreInitializing = false;
+
+  static const _screens = [
+    ChatsScreen(),
+    ConnectScreen(),
+    ProfileScreen(),
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _autoInitCore();
+  }
+
+  Future<void> _autoInitCore() async {
+    if (_coreInitializing) return;
+    _coreInitializing = true;
+    try {
+      final service = ref.read(simplexServiceProvider);
+      if (!service.isInitialized) {
+        await service.initialize();
+      }
+    } catch (e) {
+      // Silently fail — user can see logs in debug screen
+    } finally {
+      _coreInitializing = false;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final loc = AppLocalizations.of(context);
-    final service = ref.watch(simplexServiceProvider);
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(
-          _currentIndex == 0 ? loc.translate('chats') : loc.translate('contacts'),
-        ),
+        title: Text([
+          loc.translate('chats'),
+          loc.translate('connect'),
+          loc.translate('profile'),
+        ][_currentIndex]),
         actions: [
           IconButton(
             icon: const Icon(Icons.bug_report),
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const DebugScreen()),
-              );
-            },
-            tooltip: 'Debug',
+            onPressed: () => _openDebug(context),
+            tooltip: 'Debug Console',
           ),
           IconButton(
             icon: const Icon(Icons.settings),
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const SettingsScreen()),
-              );
-            },
+            onPressed: () => _openSettings(context),
+            tooltip: loc.translate('settings'),
           ),
         ],
       ),
       body: IndexedStack(
         index: _currentIndex,
-        children: const [
-          _ChatsTab(),
-          _ContactsTab(),
-        ],
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => _showCreateProfile(context, service),
-        child: const Icon(Icons.add),
+        children: _screens,
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _currentIndex,
@@ -70,86 +85,31 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             label: loc.translate('chats'),
           ),
           NavigationDestination(
-            icon: const Icon(Icons.people_outline),
-            selectedIcon: const Icon(Icons.people),
-            label: loc.translate('contacts'),
+            icon: const Icon(Icons.link),
+            selectedIcon: const Icon(Icons.link_off),
+            label: loc.translate('connect'),
+          ),
+          NavigationDestination(
+            icon: const Icon(Icons.person_outline),
+            selectedIcon: const Icon(Icons.person),
+            label: loc.translate('profile'),
           ),
         ],
       ),
     );
   }
 
-  void _showCreateProfile(BuildContext context, service) {
+  void _openDebug(BuildContext context) {
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => CreateProfileScreen(service: service)),
+      MaterialPageRoute(builder: (_) => const DebugScreenWrapper()),
     );
   }
-}
 
-// ========== Chats Tab ==========
-class _ChatsTab extends ConsumerWidget {
-  const _ChatsTab();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final loc = AppLocalizations.of(context);
-
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            Icons.chat_bubble_outline,
-            size: 80,
-            color: Theme.of(context).colorScheme.outline,
-          ),
-          const SizedBox(height: 16),
-          Text(
-            loc.translate('no_chats_yet'),
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  color: Theme.of(context).colorScheme.outline,
-                ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            loc.translate('tap_add_chat'),
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: Theme.of(context).colorScheme.outline,
-                ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ========== Contacts Tab ==========
-class _ContactsTab extends ConsumerWidget {
-  const _ContactsTab();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final loc = AppLocalizations.of(context);
-
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            Icons.people_outline,
-            size: 80,
-            color: Theme.of(context).colorScheme.outline,
-          ),
-          const SizedBox(height: 16),
-          Text(
-            loc.translate('no_contacts'),
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  color: Theme.of(context).colorScheme.outline,
-                ),
-          ),
-        ],
-      ),
+  void _openSettings(BuildContext context) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const SettingsScreen()),
     );
   }
 }

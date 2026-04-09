@@ -57,6 +57,9 @@ class AppLocalizations {
     'chat_stopped': 'Чат остановлен',
     'no_chats_yet': 'Пока нет чатов',
     'tap_add_chat': 'Нажмите + чтобы начать',
+    'connect': 'Подключения',
+    'connect_by_link': 'По ссылке',
+    'my_link': 'Моя ссылка',
   };
 
   // ========== English ==========
@@ -97,6 +100,9 @@ class AppLocalizations {
     'chat_stopped': 'Chat stopped',
     'no_chats_yet': 'No chats yet',
     'tap_add_chat': 'Tap + to get started',
+    'connect': 'Connect',
+    'connect_by_link': 'By link',
+    'my_link': 'My link',
   };
 }
 

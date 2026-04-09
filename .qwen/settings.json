@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "Bash(flutter *)",
+      "Bash(dart *)",
+      "Bash(sleep *)"
+    ]
+  },
+  "$version": 3
+}

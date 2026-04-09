@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -36,31 +34,20 @@ class _CreateProfileScreenState extends ConsumerState<CreateProfileScreen> {
       _result = null;
     });
 
-    final profile = {
-      'profile': {
-        'displayName': displayName,
-        'fullName': _fullNameController.text.trim(),
-        'shortDescr': _shortDescrController.text.trim().isEmpty
-            ? null
-            : _shortDescrController.text.trim(),
-        'image': null,
-        'contactLink': null,
-        'peerType': null,
-        'preferences': null,
-      },
-      'pastTimestamp': false,
-    };
-
-    final cmd = '/_create user ${jsonEncode(profile)}';
-    final response = await widget.service.sendCommand(cmd);
+    final response = await widget.service.createUserProfile(
+      displayName: displayName,
+      fullName: _fullNameController.text.trim(),
+      shortDescr: _shortDescrController.text.trim().isEmpty
+          ? null
+          : _shortDescrController.text.trim(),
+    );
 
     setState(() {
       _busy = false;
       if (response != null) {
-        _result = response;
-        final data = jsonDecode(response) as Map<String, dynamic>;
-        if (data.containsKey('error')) {
-          _error = (data['error'] as Map)['message']?.toString() ?? response;
+        _result = response.toString();
+        if (response.containsKey('error')) {
+          _error = response['error']?.toString() ?? _result;
         }
       }
     });

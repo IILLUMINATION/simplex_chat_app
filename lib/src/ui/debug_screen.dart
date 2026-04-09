@@ -4,26 +4,35 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../main.dart';
 import '../localization/app_localizations.dart';
 
-class DebugScreen extends ConsumerStatefulWidget {
-  const DebugScreen({super.key});
+class DebugScreenWrapper extends ConsumerStatefulWidget {
+  const DebugScreenWrapper({super.key});
 
   @override
-  ConsumerState<DebugScreen> createState() => _DebugScreenState();
+  ConsumerState<DebugScreenWrapper> createState() => _DebugScreenWrapperState();
 }
 
-class _DebugScreenState extends ConsumerState<DebugScreen> {
+class _DebugScreenWrapperState extends ConsumerState<DebugScreenWrapper> {
   final TextEditingController _cmdController = TextEditingController();
+  bool _initializing = false;
 
-  Future<void> _initCore() async {
+  @override
+  void initState() {
+    super.initState();
+    _autoInitCore();
+  }
+
+  Future<void> _autoInitCore() async {
+    if (_initializing) return;
+    _initializing = true;
     try {
       final service = ref.read(simplexServiceProvider);
-      await service.initialize();
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Init error: $e')),
-        );
+      if (!service.isInitialized) {
+        await service.initialize();
       }
+    } catch (e) {
+      // Errors are logged by service
+    } finally {
+      _initializing = false;
     }
   }
 
@@ -55,13 +64,45 @@ class _DebugScreenState extends ConsumerState<DebugScreen> {
         padding: const EdgeInsets.all(12),
         child: Column(
           children: [
-            // Init button
-            SizedBox(
+            // Status indicator
+            Container(
               width: double.infinity,
-              child: ElevatedButton.icon(
-                onPressed: _initCore,
-                icon: const Icon(Icons.play_arrow),
-                label: Text(loc.translate('init_core')),
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: service.isInitialized
+                    ? Colors.green.shade50
+                    : Colors.orange.shade50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: service.isInitialized
+                      ? Colors.green.shade200
+                      : Colors.orange.shade200,
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    service.isInitialized
+                        ? Icons.check_circle
+                        : Icons.hourglass_top,
+                    size: 20,
+                    color: service.isInitialized
+                        ? Colors.green.shade700
+                        : Colors.orange.shade700,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    service.isInitialized
+                        ? 'Core initialized'
+                        : 'Initializing...',
+                    style: TextStyle(
+                      color: service.isInitialized
+                          ? Colors.green.shade900
+                          : Colors.orange.shade900,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
               ),
             ),
             const SizedBox(height: 12),

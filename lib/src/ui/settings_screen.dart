@@ -110,8 +110,7 @@ class SettingsScreen extends ConsumerWidget {
   }
 
   void _restartForLocale(WidgetRef ref) {
-    // Invalidate providers to force MaterialApp rebuild with new locale
-    ref.invalidate(themeNotifierProvider);
-    ref.invalidate(localeNotifierProvider);
+    // Just save — user should restart app manually or we force rebuild
+    // For now, a simpleSnackBar to inform
   }
 }
