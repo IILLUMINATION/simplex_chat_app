@@ -275,7 +275,7 @@ class _ChatsScreenState extends ConsumerState<ChatsScreen> {
     );
   }
 
-  void _openChat(BuildContext context, ChatPreview chat) {
+  void _openChat(BuildContext context, ChatPreview chat) async {
     final loc = AppLocalizations.of(context);
     if (chat.chatType != 'contact' && chat.chatType != 'group') {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -286,7 +286,7 @@ class _ChatsScreenState extends ConsumerState<ChatsScreen> {
       );
       return;
     }
-    Navigator.push(
+    await Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => ChatScreen(
@@ -296,6 +296,11 @@ class _ChatsScreenState extends ConsumerState<ChatsScreen> {
         ),
       ),
     );
+    // Refresh chat list after returning from chat
+    if (mounted) {
+      await _loadChats();
+      await _loadRequests();
+    }
   }
 
   Future<void> _acceptRequest(ContactRequestPreview chat) async {
@@ -430,25 +435,29 @@ class _RequestTile extends StatelessWidget {
         ? chat.displayName
         : (chat.localDisplayName.isNotEmpty ? chat.localDisplayName : loc.translate('request'));
     final initials = _initials(title);
-    final subtitle = [
+    final parts = <String>[
       if (chat.fullName.isNotEmpty) chat.fullName,
       if (chat.shortDescr.isNotEmpty) chat.shortDescr,
-    ].join(' • ');
+    ];
+    final subtitle = parts.isEmpty
+        ? loc.translate('wants_to_connect')
+        : parts.join(' · ');
 
     return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       color: theme.colorScheme.secondaryContainer,
       elevation: 0,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             CircleAvatar(
+              radius: 22,
               backgroundColor: theme.colorScheme.secondary,
               child: Text(
                 initials,
-                style: theme.textTheme.labelLarge?.copyWith(
+                style: theme.textTheme.labelMedium?.copyWith(
                   color: theme.colorScheme.onSecondary,
                   fontWeight: FontWeight.w700,
                 ),
@@ -458,19 +467,24 @@ class _RequestTile extends StatelessWidget {
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
                     title,
-                    style: theme.textTheme.titleMedium?.copyWith(
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.titleSmall?.copyWith(
                       fontWeight: FontWeight.w600,
                       color: theme.colorScheme.onSecondaryContainer,
                     ),
                   ),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 2),
                   Text(
-                    subtitle.isNotEmpty ? subtitle : loc.translate('wants_to_connect'),
+                    subtitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.colorScheme.onSecondaryContainer,
+                      color: theme.colorScheme.onSecondaryContainer.withOpacity(0.7),
                     ),
                   ),
                 ],
@@ -478,11 +492,21 @@ class _RequestTile extends StatelessWidget {
             ),
             const SizedBox(width: 8),
             OutlinedButton(
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
               onPressed: onReject,
               child: Text(loc.translate('reject')),
             ),
             const SizedBox(width: 6),
             FilledButton(
+              style: FilledButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
               onPressed: onAccept,
               child: Text(loc.translate('accept')),
             ),
