@@ -1,0 +1,105 @@
+import 'dart:typed_data';
+
+class UiMessage {
+  final String key;
+  final String text;
+  final bool fromMe;
+  final String timeStr;
+  final String status;
+  final bool isSystem;
+  final List<UiImage> images;
+  final DateTime? time;
+  final AudioItem? audio;
+  final String? fileName;
+  final int? fileSize;
+  final String? filePath;
+
+  const UiMessage({
+    required this.key,
+    required this.text,
+    required this.fromMe,
+    required this.timeStr,
+    required this.status,
+    required this.isSystem,
+    required this.images,
+    required this.time,
+    this.audio,
+    this.fileName,
+    this.fileSize,
+    this.filePath,
+  });
+}
+
+class UiImage {
+  final Uint8List? bytes;
+  final String? filePath;
+  final int? fileId;
+  final int? fileSize;
+  final String? fileStatusType;
+  final bool isVideo;
+  final bool isCircle;
+  final bool isSticker;
+  final bool isWebm;
+  final int? durationSec;
+
+  const UiImage({
+    this.bytes,
+    this.filePath,
+    this.fileId,
+    this.fileSize,
+    this.fileStatusType,
+    this.isVideo = false,
+    this.isCircle = false,
+    this.isSticker = false,
+    this.isWebm = false,
+    this.durationSec,
+  });
+
+  bool get hasFullImage => filePath != null;
+}
+
+class AudioItem {
+  final String title;
+  final String? filePath;
+
+  const AudioItem({
+    required this.title,
+    required this.filePath,
+  });
+}
+
+class AudioNowPlaying {
+  final String filePath;
+  final String title;
+
+  const AudioNowPlaying({
+    required this.filePath,
+    required this.title,
+  });
+}
+
+class PreviewPayload {
+  final Uint8List bytes;
+  final String mime;
+
+  const PreviewPayload({required this.bytes, required this.mime});
+}
+
+class CircleVideoResult {
+  final String filePath;
+  final Uint8List previewBytes;
+  final int durationSec;
+
+  const CircleVideoResult({
+    required this.filePath,
+    required this.previewBytes,
+    required this.durationSec,
+  });
+}
+
+class SendResult {
+  final bool ok;
+  final String? error;
+
+  const SendResult({required this.ok, this.error});
+}
