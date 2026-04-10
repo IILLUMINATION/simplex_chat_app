@@ -7,7 +7,7 @@ import 'package:image/image.dart' as img;
 
 import '../models/chat_message_models.dart';
 
-UiMessage? parseChatItem(Map<String, dynamic> msg) {
+UiMessage? parseChatItem(Map<String, dynamic> msg, {String? filesBaseDir}) {
   final chatDir = msg['chatDir'] as Map<String, dynamic>?;
   final dirType = chatDir?['type'] as String? ?? '';
   final fromMe = dirType.endsWith('Snd');
@@ -59,7 +59,8 @@ UiMessage? parseChatItem(Map<String, dynamic> msg) {
     final images = <UiImage>[];
     final fileObj = msg['file'] as Map<String, dynamic>?;
     final fileSource = fileObj?['fileSource'] as Map<String, dynamic>?;
-    final filePath = fileSource?['filePath'] as String?;
+    final filePathRaw = fileSource?['filePath'] as String?;
+    final filePath = _resolveFilePath(filePathRaw, filesBaseDir);
     final fileId = fileObj?['fileId'] as int?;
     final fileSize = fileObj?['fileSize'] as int?;
     final fileStatus = fileObj?['fileStatus'] as Map<String, dynamic>?;
@@ -160,6 +161,10 @@ UiMessage? parseChatItem(Map<String, dynamic> msg) {
         fileName: fileName,
         fileSize: fileSize,
         filePath: filePath,
+        fileId: fileId,
+        fileStatusType: fileStatusType,
+        transferProgress: transferProgress,
+        transferTotal: transferTotal,
       );
     }
     String display = text;
@@ -194,6 +199,10 @@ UiMessage? parseChatItem(Map<String, dynamic> msg) {
       fileName: msgType == 'file' ? fileName : null,
       fileSize: msgType == 'file' ? fileSize : null,
       filePath: msgType == 'file' ? filePath : null,
+      fileId: msgType == 'file' ? fileId : null,
+      fileStatusType: msgType == 'file' ? fileStatusType : null,
+      transferProgress: msgType == 'file' ? transferProgress : null,
+      transferTotal: msgType == 'file' ? transferTotal : null,
     );
   }
 
@@ -261,6 +270,14 @@ AudioItem? parseAudio(
     transferProgress: transferProgress,
     transferTotal: transferTotal,
   );
+}
+
+String? _resolveFilePath(String? filePath, String? baseDir) {
+  if (filePath == null || filePath.isEmpty) return filePath;
+  if (baseDir == null || baseDir.isEmpty) return filePath;
+  if (filePath.startsWith('/')) return filePath;
+  if (baseDir.endsWith('/')) return '$baseDir$filePath';
+  return '$baseDir/$filePath';
 }
 
 bool closeInTime(DateTime? a, DateTime? b, Duration delta) {

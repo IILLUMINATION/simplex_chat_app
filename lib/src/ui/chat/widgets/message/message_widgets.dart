@@ -18,7 +18,7 @@ import 'package:highlight/languages/cpp.dart';
 import 'package:highlight/languages/bash.dart';
 import 'package:intl/intl.dart';
 import 'package:just_audio/just_audio.dart';
-import 'package:url_launcher/url_launcher.dart';
+import 'package:open_filex/open_filex.dart';
 
 import '../../../../data/pin_store.dart' show PinnedMessage;
 import '../../models/chat_message_models.dart';
@@ -31,6 +31,7 @@ class MessageBubble extends StatelessWidget {
   final void Function(List<UiImage> images, int index) onOpenMedia;
   final void Function(AudioItem audio) onPlayAudio;
   final void Function(AudioItem audio) onDownloadAudio;
+  final void Function(UiMessage message) onDownloadFile;
   final bool isPinned;
   final AudioPlayer audioPlayer;
   final AudioNowPlaying? nowPlaying;
@@ -43,6 +44,7 @@ class MessageBubble extends StatelessWidget {
     required this.onOpenMedia,
     required this.onPlayAudio,
     required this.onDownloadAudio,
+    required this.onDownloadFile,
     this.isPinned = false,
     required this.audioPlayer,
     required this.nowPlaying,
@@ -133,7 +135,12 @@ class MessageBubble extends StatelessWidget {
                   fileName: message.fileName!,
                   fileSize: message.fileSize,
                   filePath: message.filePath,
+                  fileId: message.fileId,
+                  fileStatusType: message.fileStatusType,
+                  transferProgress: message.transferProgress,
+                  transferTotal: message.transferTotal,
                   fromMe: fromMe,
+                  onDownload: () => onDownloadFile(message),
                 ),
                 if (text.isNotEmpty) const SizedBox(height: 6),
               ],
@@ -569,13 +576,23 @@ class FileAttachment extends StatelessWidget {
   final String fileName;
   final int? fileSize;
   final String? filePath;
+  final int? fileId;
+  final String? fileStatusType;
+  final int? transferProgress;
+  final int? transferTotal;
   final bool fromMe;
+  final VoidCallback? onDownload;
 
   const FileAttachment({
     required this.fileName,
     this.fileSize,
     this.filePath,
+    this.fileId,
+    this.fileStatusType,
+    this.transferProgress,
+    this.transferTotal,
     required this.fromMe,
+    this.onDownload,
   });
 
   String _formatSize(int bytes) {
@@ -607,75 +624,115 @@ class FileAttachment extends StatelessWidget {
     final fileIconColor = const Color(0xFF8AB4F8);
     final containerBg = const Color(0xFF222222);
 
-    return Container(
-      constraints: const BoxConstraints(maxWidth: 250),
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-      decoration: BoxDecoration(
-        color: containerBg,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(
-          color: const Color(0xFF333333),
-          width: 1,
-        ),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: iconBgColor,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Icon(_fileIcon(), size: 20, color: fileIconColor),
+    final isIncoming = !fromMe;
+    final hasLocal = filePath != null && filePath!.isNotEmpty;
+    final needsDownload =
+        isIncoming && !hasLocal && fileId != null && fileStatusType == 'rcvInvitation';
+    final isDownloading =
+        isIncoming && !hasLocal && (fileStatusType == 'rcvTransfer' || fileStatusType == 'rcvAccepted');
+    final showProgress = (fileStatusType == 'rcvTransfer' ||
+            fileStatusType == 'rcvAccepted' ||
+            fileStatusType == 'sndTransfer') &&
+        transferProgress != null &&
+        transferTotal != null &&
+        transferTotal! > 0;
+    final progress = showProgress ? (transferProgress! / transferTotal!).clamp(0.0, 1.0) : null;
+
+    Future<void> openFile() async {
+      if (!hasLocal) return;
+      final result = await OpenFilex.open(filePath!);
+      if (result.type != ResultType.done && context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Не удалось открыть файл: ${result.message ?? result.type}')),
+        );
+      }
+    }
+
+    return InkWell(
+      onTap: hasLocal ? openFile : (needsDownload ? onDownload : null),
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 250),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        decoration: BoxDecoration(
+          color: containerBg,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: const Color(0xFF333333),
+            width: 1,
           ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  fileName,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontWeight: FontWeight.w500,
-                    fontSize: 13,
-                    color: textColor,
-                    height: 1.2,
-                  ),
-                ),
-                if (fileSize != null) ...[
-                  const SizedBox(height: 2),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: iconBgColor,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Icon(_fileIcon(), size: 20, color: fileIconColor),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
                   Text(
-                    _formatSize(fileSize!),
+                    fileName,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      fontSize: 11,
-                      color: sizeColor,
+                      fontWeight: FontWeight.w500,
+                      fontSize: 13,
+                      color: textColor,
+                      height: 1.2,
                     ),
                   ),
+                  if (fileSize != null) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      _formatSize(fileSize!),
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: sizeColor,
+                      ),
+                    ),
+                  ],
                 ],
-              ],
+              ),
             ),
-          ),
-          if (filePath != null) ...[
             const SizedBox(width: 4),
-            IconButton(
-              icon: Icon(Icons.open_in_new, size: 18, color: fileIconColor),
-              onPressed: () async {
-                final uri = Uri.file(filePath!);
-                if (await canLaunchUrl(uri)) {
-                  await launchUrl(uri);
-                }
-              },
-              padding: const EdgeInsets.all(6),
-              constraints: const BoxConstraints(),
-              splashRadius: 20,
-            ),
+            if (needsDownload)
+              IconButton(
+                icon: Icon(Icons.download, size: 20, color: fileIconColor),
+                onPressed: onDownload,
+                padding: const EdgeInsets.all(6),
+                constraints: const BoxConstraints(),
+                splashRadius: 20,
+              )
+            else if (isDownloading || showProgress)
+              SizedBox(
+                width: 22,
+                height: 22,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  value: progress,
+                  valueColor: AlwaysStoppedAnimation<Color>(fileIconColor),
+                ),
+              )
+            else if (hasLocal)
+              IconButton(
+                icon: Icon(Icons.open_in_new, size: 18, color: fileIconColor),
+                onPressed: openFile,
+                padding: const EdgeInsets.all(6),
+                constraints: const BoxConstraints(),
+                splashRadius: 20,
+              ),
           ],
-        ],
+        ),
       ),
     );
   }

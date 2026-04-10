@@ -43,6 +43,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   final Set<int> _autoRequestedFiles = <int>{};
   bool _autoDownloadEnabled = false;
   bool _enableFileReceive = false;
+  String? _filesDir;
   StreamSubscription<Map<String, dynamic>>? _eventSub;
   Timer? _refreshDebounce;
   final AudioPlayer _audioPlayer = AudioPlayerHolder.player;
@@ -60,7 +61,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   @override
   void initState() {
     super.initState();
-    _loadMessages();
+    _initFilesDir().then((_) => _loadMessages());
     _pinStore.load();
     _eventSub = ref.read(tanglexServiceProvider).eventStream.listen(_handleEvent);
     _audioStateSub = _audioPlayer.playerStateStream.listen((state) {
@@ -73,6 +74,15 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     });
   }
 
+  Future<void> _initFilesDir() async {
+    try {
+      final docs = await getApplicationDocumentsDirectory();
+      final dir = Directory('${docs.path}/files');
+      if (!dir.existsSync()) dir.createSync(recursive: true);
+      _filesDir = dir.path;
+    } catch (_) {}
+  }
+
   Future<void> _loadMessages() async {
     try {
       setState(() => _loading = true);
@@ -81,7 +91,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       final parsed = <UiMessage>[];
       for (final raw in msgs) {
         try {
-          final ui = parseChatItem(raw);
+          final ui = parseChatItem(raw, filesBaseDir: _filesDir);
           if (ui != null) parsed.add(ui);
         } catch (e) {
           debugPrint('Error parsing message: $e');
@@ -559,10 +569,33 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     if (fileId == null) return;
     final service = ref.read(tanglexServiceProvider);
     try {
-      final ok = await service.receiveFile(fileId, approvedRelays: true);
+      final ok = await service.receiveFile(
+        fileId,
+        approvedRelays: true,
+        encrypt: false,
+        filePath: _filesDir,
+      );
       if (ok && mounted) await _loadMessages();
     } catch (e) {
       debugPrint('Error requesting audio file: $e');
+    }
+  }
+
+  Future<void> _requestFile(UiMessage message) async {
+    final fileId = message.fileId;
+    if (fileId == null) return;
+    if (_filesDir == null) return;
+    final service = ref.read(tanglexServiceProvider);
+    try {
+      final ok = await service.receiveFile(
+        fileId,
+        approvedRelays: true,
+        encrypt: false,
+        filePath: _filesDir,
+      );
+      if (ok && mounted) await _loadMessages();
+    } catch (e) {
+      debugPrint('Error requesting file: $e');
     }
   }
 
@@ -712,6 +745,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       onOpenMedia: _openMedia,
       onPlayAudio: _playAudio,
       onDownloadAudio: _requestAudioFile,
+      onDownloadFile: _requestFile,
       isPinned: isPinned,
       audioPlayer: _audioPlayer,
       nowPlaying: _audioNowPlaying,
@@ -835,6 +869,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
   Future<void> _autoReceiveImages(List<UiMessage> parsed) async {
     if (!_autoDownloadEnabled || !_enableFileReceive) return;
+    if (_filesDir == null) return;
     final service = ref.read(tanglexServiceProvider);
     bool anyAccepted = false;
     for (final m in parsed) {
@@ -848,7 +883,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         if (img.fileSize != null && img.fileSize! > maxAutoReceiveImageSize) continue;
         _autoRequestedFiles.add(fileId);
         await Future<void>.delayed(const Duration(milliseconds: 300));
-        final ok = await service.receiveFile(fileId, approvedRelays: true);
+        final ok = await service.receiveFile(
+          fileId,
+          approvedRelays: true,
+          encrypt: false,
+          filePath: _filesDir,
+        );
         if (ok) anyAccepted = true;
       }
     }
@@ -872,7 +912,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final service = ref.read(tanglexServiceProvider);
     try {
       await Future<void>.delayed(const Duration(milliseconds: 300));
-      final ok = await service.receiveFile(image.fileId!, approvedRelays: true, encrypt: true);
+      final ok = await service.receiveFile(
+        image.fileId!,
+        approvedRelays: true,
+        encrypt: false,
+        filePath: _filesDir,
+      );
       if (ok && mounted) {
         await _loadMessages();
       }

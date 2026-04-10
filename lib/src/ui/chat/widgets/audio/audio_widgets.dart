@@ -156,7 +156,9 @@ class AudioBubble extends StatelessWidget {
     final isCurrent = nowPlaying?.filePath == audio.filePath;
     final canPlay = audio.filePath != null;
     final isMissing = !canPlay && audio.fileId != null && !fromMe;
-    final showProgress = (audio.fileStatusType == 'rcvTransfer' || audio.fileStatusType == 'sndTransfer') &&
+    final showProgress = (audio.fileStatusType == 'rcvTransfer' ||
+            audio.fileStatusType == 'rcvAccepted' ||
+            audio.fileStatusType == 'sndTransfer') &&
         (audio.transferTotal != null && audio.transferTotal! > 0) &&
         audio.transferProgress != null;
     final progress = showProgress ? (audio.transferProgress! / audio.transferTotal!) : null;

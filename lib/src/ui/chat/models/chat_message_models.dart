@@ -15,6 +15,10 @@ class UiMessage {
   final String? fileName;
   final int? fileSize;
   final String? filePath;
+  final int? fileId;
+  final String? fileStatusType;
+  final int? transferProgress;
+  final int? transferTotal;
 
   const UiMessage({
     required this.key,
@@ -31,6 +35,10 @@ class UiMessage {
     this.fileName,
     this.fileSize,
     this.filePath,
+    this.fileId,
+    this.fileStatusType,
+    this.transferProgress,
+    this.transferTotal,
   });
 }
 

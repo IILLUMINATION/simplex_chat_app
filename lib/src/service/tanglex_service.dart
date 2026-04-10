@@ -84,6 +84,8 @@ class TanglexService {
       await _native.startEventLoop(_receivePort!.sendPort);
       _appendLog('Event loop started.');
 
+      await _setAppFilePaths();
+
       _isInitialized = true;
       await _ensureActiveUser();
       await _startChatIfPossible();
@@ -911,6 +913,41 @@ class TanglexService {
       }
     } catch (_) {
       return;
+    }
+  }
+
+  Future<void> _setAppFilePaths() async {
+    if (!Platform.isAndroid) return;
+
+    final docsDir = await getApplicationDocumentsDirectory();
+    final tempDir = await getTemporaryDirectory();
+
+    final filesDir = '${docsDir.path}/files';
+    final assetsDir = docsDir.path;
+
+    Directory(filesDir).createSync(recursive: true);
+    Directory(tempDir.path).createSync(recursive: true);
+    Directory(assetsDir).createSync(recursive: true);
+
+    final payload = <String, dynamic>{
+      'appFilesFolder': filesDir,
+      'appTempFolder': tempDir.path,
+      'appAssetsFolder': assetsDir,
+    };
+
+    final cmd = '/set file paths ${_jsonCompact(payload)}';
+    final resp = await sendCommand(cmd);
+    if (resp == null) {
+      _appendLog('apiSetAppFilePaths failed: no response');
+      return;
+    }
+    try {
+      final json = Map<String, dynamic>.from(_decodeJson(resp));
+      if (json.containsKey('error')) {
+        _appendLog('apiSetAppFilePaths error: ${json['error']}');
+      }
+    } catch (_) {
+      // ignore parse errors; command is best-effort
     }
   }
 

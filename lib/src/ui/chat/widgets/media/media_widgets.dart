@@ -56,7 +56,9 @@ class MediaGrid extends StatelessWidget {
         final isDownloading = isIncoming &&
             (img.fileStatusType == 'rcvTransfer' || img.fileStatusType == 'rcvAccepted');
         final isSending = fromMe && img.fileStatusType == 'sndTransfer';
-        final showProgress = (img.fileStatusType == 'rcvTransfer' || img.fileStatusType == 'sndTransfer') &&
+        final showProgress = (img.fileStatusType == 'rcvTransfer' ||
+                img.fileStatusType == 'rcvAccepted' ||
+                img.fileStatusType == 'sndTransfer') &&
             (img.transferTotal != null && img.transferTotal! > 0) &&
             img.transferProgress != null;
         final progress = showProgress ? (img.transferProgress! / img.transferTotal!) : null;
