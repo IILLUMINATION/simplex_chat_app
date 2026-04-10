@@ -305,8 +305,8 @@ class SwipeReplyWrapper extends StatefulWidget {
 }
 
 class _SwipeReplyWrapperState extends State<SwipeReplyWrapper> with SingleTickerProviderStateMixin {
-  static const double _maxOffset = 64;
-  static const double _triggerOffset = 48;
+  static const double _maxOffset = -64;
+  static const double _triggerOffset = -48;
   double _offset = 0;
   bool _triggered = false;
   late final AnimationController _controller;
@@ -343,9 +343,9 @@ class _SwipeReplyWrapperState extends State<SwipeReplyWrapper> with SingleTicker
       onHorizontalDragUpdate: widget.enabled
           ? (d) {
               final delta = d.delta.dx;
-              if (delta <= 0 && _offset <= 0) return;
-              final next = (_offset + delta).clamp(0.0, _maxOffset);
-              if (next >= _triggerOffset && !_triggered) {
+              if (delta >= 0 && _offset >= 0) return;
+              final next = (_offset + delta).clamp(_maxOffset, 0.0);
+              if (next <= _triggerOffset && !_triggered) {
                 _triggered = true;
                 HapticFeedback.selectionClick();
               }
@@ -356,7 +356,7 @@ class _SwipeReplyWrapperState extends State<SwipeReplyWrapper> with SingleTicker
           : null,
       onHorizontalDragEnd: widget.enabled
           ? (_) {
-              final shouldReply = _offset >= _triggerOffset;
+              final shouldReply = _offset <= _triggerOffset;
               _animateBack();
               if (shouldReply) widget.onReply?.call();
               _triggered = false;
@@ -369,11 +369,11 @@ class _SwipeReplyWrapperState extends State<SwipeReplyWrapper> with SingleTicker
             }
           : null,
       child: Stack(
-        alignment: Alignment.centerLeft,
+        alignment: Alignment.centerRight,
         children: [
           if (showReply)
             Positioned(
-              left: 6,
+              right: 6,
               child: Container(
                 width: 26,
                 height: 26,
@@ -768,12 +768,7 @@ class FileAttachment extends StatelessWidget {
         !awaitingSender;
     final isDownloading =
         isIncoming && !hasLocal && (fileStatusType == 'rcvTransfer' || fileStatusType == 'rcvAccepted');
-    final showProgress = (fileStatusType == 'rcvTransfer' ||
-            fileStatusType == 'rcvAccepted' ||
-            fileStatusType == 'sndTransfer') &&
-        transferProgress != null &&
-        transferTotal != null &&
-        transferTotal! > 0;
+    final showProgress = transferProgress != null && transferTotal != null && transferTotal! > 0;
     final progress = showProgress ? (transferProgress! / transferTotal!).clamp(0.0, 1.0) : null;
 
     Future<void> openFile() async {
@@ -906,7 +901,7 @@ class FileAttachment extends StatelessWidget {
 
 class PinnedBar extends StatefulWidget {
   final List<PinnedMessage> pinned;
-  final void Function(PinnedMessage) onPinTap;
+  final void Function(PinnedMessage, {void Function()? onComplete}) onPinTap;
   final void Function(PinnedMessage) onUnpin;
   final bool Function(PinnedMessage) isPinVisible;
 
@@ -939,32 +934,103 @@ class _PinnedBarState extends State<PinnedBar> {
     }
   }
 
+  void _syncCurrentPage() {
+    final pins = widget.pinned;
+    if (pins.isEmpty || pins.length <= 1) return;
+
+    // Проверяем, какие пины сейчас видимы
+    final visibleIndices = <int>[];
+    for (int i = 0; i < pins.length; i++) {
+      if (widget.isPinVisible(pins[i])) {
+        visibleIndices.add(i);
+      }
+    }
+
+    // Если текущий _currentPage стал видимым — оставляем его
+    final clamped = _currentPage.clamp(0, pins.length - 1);
+    if (visibleIndices.contains(clamped)) return;
+
+    // Если _currentPage не виден, но есть видимые — переключиться на последний видимый
+    if (visibleIndices.isNotEmpty) {
+      final lastVisible = visibleIndices.reduce((a, b) => a > b ? a : b);
+      if (lastVisible != _currentPage) {
+        // Откладываем setState до следующего фрейма
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            setState(() => _currentPage = lastVisible);
+          }
+        });
+      }
+      return;
+    }
+
+    // Ни один не виден — ничего не делаем
+  }
+
   void _advanceToNext(List<PinnedMessage> pins) {
     if (pins.isEmpty) return;
+    debugPrint('PIN_ADVANCE: pinsCount=${pins.length}');
     if (pins.length == 1) {
+      debugPrint('PIN_ADVANCE: single pin, tapping');
       widget.onPinTap(pins.first);
       return;
     }
+    // _selectDisplayIndex уже выбрал нужный индекс (невидимый или currentPage если виден)
+    // При явном нажатии переключаемся на следующий
     final displayIndex = _selectDisplayIndex(pins);
-    final allVisible = widget.isPinVisible(pins[displayIndex]);
-    final nextIndex = allVisible ? (displayIndex + 1) % pins.length : displayIndex;
-    setState(() => _currentPage = nextIndex);
-    widget.onPinTap(pins[nextIndex]);
+    final nextIndex = (displayIndex + 1) % pins.length;
+    debugPrint('PIN_ADVANCE: displayIdx=$displayIndex nextIdx=$nextIndex');
+    widget.onPinTap(
+      pins[nextIndex],
+      onComplete: () {
+        debugPrint('PIN_ADVANCE: onComplete, updating currentPage to $nextIndex');
+        setState(() => _currentPage = nextIndex);
+      },
+    );
   }
 
   int _selectDisplayIndex(List<PinnedMessage> pins) {
     if (pins.isEmpty) return 0;
+    debugPrint('PIN_SELECT: currentPage=$_currentPage, pinsCount=${pins.length}');
+
+    // Проверяем, все ли пины видимы
+    bool allVisible = true;
+    for (int i = 0; i < pins.length; i++) {
+      if (!widget.isPinVisible(pins[i])) {
+        allVisible = false;
+        debugPrint('PIN_SELECT: pin i=$i NOT visible');
+        break;
+      }
+    }
+    if (allVisible) {
+      debugPrint('PIN_SELECT: all visible, selecting idx=0 (latest)');
+      return 0;
+    }
+
+    // currentPage виден — не переключаемся (только что прокрутились)
+    final clampedCurrent = _currentPage.clamp(0, pins.length - 1);
+    if (widget.isPinVisible(pins[clampedCurrent])) {
+      debugPrint('PIN_SELECT: currentPage visible, keeping idx=$clampedCurrent');
+      return clampedCurrent;
+    }
+
+    // Ищем первый невидимый
     for (int i = 0; i < pins.length; i++) {
       final idx = (_currentPage + i) % pins.length;
+      debugPrint('PIN_SELECT: checking idx=$idx visible=${widget.isPinVisible(pins[idx])}');
       if (!widget.isPinVisible(pins[idx])) {
+        debugPrint('PIN_SELECT: selected idx=$idx (not visible)');
         return idx;
       }
     }
-    return _currentPage;
+
+    return 0;
   }
 
   @override
   Widget build(BuildContext context) {
+    _syncCurrentPage();
+
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final pins = widget.pinned;

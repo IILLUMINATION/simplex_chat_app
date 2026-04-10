@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
+import 'dart:ui';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -134,6 +135,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   UiMessage? _replyTo;
   bool _circleMode = false;
   int _selectedPackIndex = 0;
+  bool _showScrollToBottom = false;
 
   @override
   void initState() {
@@ -837,8 +839,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     );
   }
 
-  Future<void> _scrollToMessage(String msgKey) async {
-    final idx = _displayIndexByKey[msgKey];
+  Future<void> _scrollToMessage(String msgKey, {void Function()? onComplete}) async {
+    var idx = _displayIndexByKey[msgKey];
+    // Fallback: если ключ начинается с "group_", пробуем без префикса
+    if (idx == null && msgKey.startsWith('group_')) {
+      final originalKey = msgKey.substring(6);
+      idx = _displayIndexByKey[originalKey];
+    }
     debugPrint('PIN_SCROLL key=$msgKey index=$idx listLen=${_displayIndexByKey.length}');
     if (idx == null) {
       debugPrint('PIN_SCROLL: index not found for key=$msgKey');
@@ -854,17 +861,53 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       curve: Curves.easeInOut,
       alignment: 0.2,
     );
+    onComplete?.call();
   }
 
   bool _isMessageVisible(String msgKey, Iterable<ItemPosition> positions) {
-    final idx = _displayIndexByKey[msgKey];
+    var idx = _displayIndexByKey[msgKey];
+    if (idx == null && msgKey.startsWith('group_')) {
+      idx = _displayIndexByKey[msgKey.substring(6)];
+    }
+    debugPrint('PIN_VISIBILITY: key=$msgKey resolvedIdx=$idx positionsCount=${positions.length}');
     if (idx == null) return false;
     for (final p in positions) {
       if (p.index == idx && p.itemTrailingEdge > 0 && p.itemLeadingEdge < 1) {
+        debugPrint('PIN_VISIBILITY: VISIBLE idx=$idx leading=${p.itemLeadingEdge} trailing=${p.itemTrailingEdge}');
         return true;
       }
     }
+    debugPrint('PIN_VISIBILITY: NOT VISIBLE idx=$idx');
     return false;
+  }
+
+  void _updateScrollToBottomVisibility(Iterable<ItemPosition> positions) {
+    // Показываем кнопку, если пользователь не на дне списка (reverse=true, значит index=0 это дно)
+    // Проверяем, есть ли элементы с index > 0 видимые на экране
+    bool shouldShow = false;
+    for (final p in positions) {
+      if (p.index > 5) {
+        shouldShow = true;
+        break;
+      }
+    }
+    if (shouldShow != _showScrollToBottom) {
+      // Откладываем setState до следующего фрейма, чтобы не вызывать во время build
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          setState(() => _showScrollToBottom = shouldShow);
+        }
+      });
+    }
+  }
+
+  Future<void> _scrollToBottom() async {
+    if (!_itemScrollController.isAttached) return;
+    await _itemScrollController.scrollTo(
+      index: 0,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeInOut,
+    );
   }
 
   Future<void> _showMessageOptions(BuildContext ctx, Offset tapPosition, UiMessage m, bool isPinned) async {
@@ -1021,8 +1064,18 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     return Scaffold(
       backgroundColor: chatBackground,
       appBar: AppBar(
-        backgroundColor: headerBg,
+        backgroundColor: Colors.transparent,
+        surfaceTintColor: Colors.transparent,
+        scrolledUnderElevation: 0,
         elevation: 0,
+        flexibleSpace: ClipRect(
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+            child: Container(
+              color: headerBg.withOpacity(0.85),
+            ),
+          ),
+        ),
         leading: IconButton(icon: Icon(Icons.arrow_back, color: textPrimary), onPressed: () => Navigator.of(context).pop()),
         titleSpacing: 0,
         title: _ChatHeader(
@@ -1053,33 +1106,52 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                             ValueListenableBuilder<Iterable<ItemPosition>>(
                               valueListenable: _itemPositionsListener.itemPositions,
                               builder: (context, positions, _) {
+                                // Обновляем кнопку прокрутки вниз
+                                _updateScrollToBottomVisibility(positions);
                                 return PinnedBar(
-                                  pinned: _pinStore.getPinned(widget.chatRef),
-                                  onPinTap: (pm) => _scrollToMessage(pm.key),
+                                  pinned: _pinStore.getPinned(widget.chatRef).reversed.toList(),
+                                  onPinTap: (pm, {onComplete}) => _scrollToMessage(pm.key, onComplete: onComplete),
                                   onUnpin: (pm) { _pinStore.unpin(widget.chatRef, pm.key); setState(() {}); },
                                   isPinVisible: (pm) => _isMessageVisible(pm.key, positions),
                                 );
                               },
                             ),
                           Expanded(
-                            child: ScrollablePositionedList.builder(
-                              itemScrollController: _itemScrollController,
-                              itemPositionsListener: _itemPositionsListener,
-                              reverse: true,
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                              itemCount: displayEntries.length,
-                              itemBuilder: (context, index) {
-                                final entry = displayEntries[index];
-                                switch (entry.type) {
-                                  case _DisplayEntryType.date:
-                                    return DateDivider(date: entry.date!);
-                                  case _DisplayEntryType.system:
-                                    return SystemBubble(text: entry.message!.text);
-                                  case _DisplayEntryType.group:
-                                  case _DisplayEntryType.message:
-                                    return _buildMessageBubble(entry.message!);
-                                }
-                              },
+                            child: Stack(
+                              children: [
+                                ScrollablePositionedList.builder(
+                                  itemScrollController: _itemScrollController,
+                                  itemPositionsListener: _itemPositionsListener,
+                                  reverse: true,
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                                  itemCount: displayEntries.length,
+                                  itemBuilder: (context, index) {
+                                    final entry = displayEntries[index];
+                                    switch (entry.type) {
+                                      case _DisplayEntryType.date:
+                                        return DateDivider(date: entry.date!);
+                                      case _DisplayEntryType.system:
+                                        return SystemBubble(text: entry.message!.text);
+                                      case _DisplayEntryType.group:
+                                      case _DisplayEntryType.message:
+                                        return _buildMessageBubble(entry.message!);
+                                    }
+                                  },
+                                ),
+                                // Кнопка прокрутки вниз
+                                if (_showScrollToBottom)
+                                  Positioned(
+                                    right: 12,
+                                    bottom: 12,
+                                    child: FloatingActionButton(
+                                      mini: true,
+                                      backgroundColor: const Color(0xFF2A2D32),
+                                      elevation: 4,
+                                      onPressed: _scrollToBottom,
+                                      child: const Icon(Icons.arrow_downward, size: 20, color: Color(0xFF808080)),
+                                    ),
+                                  ),
+                              ],
                             ),
                           ),
                         ],
