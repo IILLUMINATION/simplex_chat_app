@@ -201,7 +201,26 @@ class TanglexService {
   }
 
   /// Send a text message to a contact
-  Future<bool> sendMessage(String chatRef, String text) async {
+  Future<bool> sendMessage(String chatRef, String text, {int? quotedItemId}) async {
+    if (quotedItemId != null) {
+      final payload = {
+        'quotedItemId': quotedItemId,
+        'msgContent': {
+          'type': 'text',
+          'text': text,
+        },
+      };
+      final jsonStr = _jsonCompact([payload]);
+      final cmd = '/_send $chatRef json $jsonStr';
+      final resp = await sendCommand(cmd);
+      if (resp == null) return false;
+      try {
+        final json = Map<String, dynamic>.from(_decodeJson(resp));
+        return json['result'] != null;
+      } catch (_) {
+        return false;
+      }
+    }
     final cmd = '/_send $chatRef text ${_escapeText(text)}';
     final resp = await sendCommand(cmd);
     if (resp == null) return false;
@@ -213,19 +232,24 @@ class TanglexService {
     }
   }
 
-  Future<bool> sendImages(String chatRef, List<ImagePayload> images) async {
+  Future<bool> sendImages(String chatRef, List<ImagePayload> images, {int? quotedItemId}) async {
     if (images.isEmpty) return false;
-    final composed = images
-        .map((img) => {
-              'filePath': img.filePath,
-              'msgContent': {
-                'type': 'image',
-                'text': '',
-                'image':
-                    'data:${img.previewMime};base64,${base64Encode(img.previewBytes)}',
-              }
-            })
-        .toList();
+    final composed = <Map<String, dynamic>>[];
+    for (int i = 0; i < images.length; i++) {
+      final img = images[i];
+      final payload = {
+        'filePath': img.filePath,
+        'msgContent': {
+          'type': 'image',
+          'text': '',
+          'image': 'data:${img.previewMime};base64,${base64Encode(img.previewBytes)}',
+        }
+      };
+      if (i == 0 && quotedItemId != null) {
+        payload['quotedItemId'] = quotedItemId;
+      }
+      composed.add(payload);
+    }
     final jsonStr = jsonEncode(composed);
 
     // Avoid largeMsg by splitting big payloads.
@@ -274,9 +298,11 @@ class TanglexService {
     required String chatRef,
     required String filePath,
     String text = '',
+    int? quotedItemId,
   }) async {
     final payload = {
       'filePath': filePath,
+      if (quotedItemId != null) 'quotedItemId': quotedItemId,
       'msgContent': {
         'type': 'file',
         'text': text,
@@ -307,6 +333,7 @@ class TanglexService {
     required int durationSec,
     String text = '',
     bool isCircle = false,
+    int? quotedItemId,
   }) async {
     String pathToSend = filePath;
     if (isCircle) {
@@ -327,6 +354,7 @@ class TanglexService {
 
     final payload = {
       'filePath': pathToSend,
+      if (quotedItemId != null) 'quotedItemId': quotedItemId,
       'msgContent': {
         'type': 'video',
         'text': text,

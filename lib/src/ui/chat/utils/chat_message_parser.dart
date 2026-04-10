@@ -16,7 +16,14 @@ UiMessage? parseChatItem(Map<String, dynamic> msg) {
   final statusObj = meta?['itemStatus'];
   final status = statusObj is Map ? (statusObj['type'] as String? ?? '') : '';
   final itemText = meta?['itemText'] as String?;
+  final itemId = meta?['itemId'] as int?;
   final tsStr = meta?['itemTs'] as String?;
+  final quotedItem = msg['quotedItem'] as Map<String, dynamic>?;
+  final quotedContent = quotedItem?['content'] as Map<String, dynamic>?;
+  final quotedText = quotedContent?['text'] as String?;
+  final quoted = (quotedText?.isNotEmpty == true)
+      ? QuotedMessage(text: quotedText!)
+      : null;
   final msgKey = '${dirType}_${tsStr ?? ''}_${itemText ?? ''}';
   String timeStr = '';
   DateTime? time;
@@ -56,11 +63,17 @@ UiMessage? parseChatItem(Map<String, dynamic> msg) {
     final fileSize = fileObj?['fileSize'] as int?;
     final fileStatus = fileObj?['fileStatus'] as Map<String, dynamic>?;
     final fileStatusType = fileStatus?['type'] as String?;
+    final rcvProgress = fileStatus?['rcvProgress'] as int?;
+    final rcvTotal = fileStatus?['rcvTotal'] as int?;
+    final sndProgress = fileStatus?['sndProgress'] as int?;
+    final sndTotal = fileStatus?['sndTotal'] as int?;
+    final transferProgress = rcvProgress ?? sndProgress;
+    final transferTotal = rcvTotal ?? sndTotal;
     final fileName = fileObj?['fileName'] as String?;
     final isCircle = (fileName != null && fileName.startsWith('circle_'));
     final isSticker = fileName != null && fileName.startsWith('st__');
     final isWebm = fileName != null && fileName.toLowerCase().endsWith('.webm');
-    final audioItem = parseAudio(fileName, filePath);
+    final audioItem = parseAudio(fileName, filePath, fileId, fileStatusType, fileSize, transferProgress, transferTotal);
     final decoded = decodeImage(imageData);
     final hasLocalFile = filePath != null && File(filePath).existsSync();
     if (msgType == 'video') {
@@ -70,6 +83,8 @@ UiMessage? parseChatItem(Map<String, dynamic> msg) {
         fileId: fileId,
         fileSize: fileSize,
         fileStatusType: fileStatusType,
+        transferProgress: transferProgress,
+        transferTotal: transferTotal,
         isVideo: true,
         isCircle: isCircle,
         isSticker: isSticker,
@@ -83,6 +98,8 @@ UiMessage? parseChatItem(Map<String, dynamic> msg) {
         fileId: fileId,
         fileSize: fileSize,
         fileStatusType: fileStatusType,
+        transferProgress: transferProgress,
+        transferTotal: transferTotal,
         isSticker: isSticker,
         isWebm: isWebm,
       ));
@@ -93,6 +110,8 @@ UiMessage? parseChatItem(Map<String, dynamic> msg) {
           fileId: fileId,
           fileSize: fileSize,
           fileStatusType: fileStatusType,
+          transferProgress: transferProgress,
+          transferTotal: transferTotal,
           isVideo: false,
         ));
       } else if (decoded != null) {
@@ -101,6 +120,8 @@ UiMessage? parseChatItem(Map<String, dynamic> msg) {
           fileId: fileId,
           fileSize: fileSize,
           fileStatusType: fileStatusType,
+          transferProgress: transferProgress,
+          transferTotal: transferTotal,
           isVideo: false,
         ));
       }
@@ -114,6 +135,8 @@ UiMessage? parseChatItem(Map<String, dynamic> msg) {
         fileId: fileId,
         fileSize: fileSize,
         fileStatusType: fileStatusType,
+        transferProgress: transferProgress,
+        transferTotal: transferTotal,
         isVideo: msgType == 'video',
         isSticker: true,
         isWebm: isWebm,
@@ -130,6 +153,8 @@ UiMessage? parseChatItem(Map<String, dynamic> msg) {
         isSystem: false,
         images: const [],
         time: time,
+        itemId: itemId,
+        quoted: quoted,
         audio: audioItem,
         fileName: fileName,
         fileSize: fileSize,
@@ -163,6 +188,8 @@ UiMessage? parseChatItem(Map<String, dynamic> msg) {
       isSystem: false,
       images: images,
       time: time,
+      itemId: itemId,
+      quoted: quoted,
       fileName: msgType == 'file' ? fileName : null,
       fileSize: msgType == 'file' ? fileSize : null,
       filePath: msgType == 'file' ? filePath : null,
@@ -180,6 +207,8 @@ UiMessage? parseChatItem(Map<String, dynamic> msg) {
       isSystem: true,
       images: const [],
       time: time,
+      itemId: itemId,
+      quoted: quoted,
     );
   }
 
@@ -199,7 +228,15 @@ UiMessage? parseChatItem(Map<String, dynamic> msg) {
   return null;
 }
 
-AudioItem? parseAudio(String? fileName, String? filePath) {
+AudioItem? parseAudio(
+  String? fileName,
+  String? filePath,
+  int? fileId,
+  String? fileStatusType,
+  int? fileSize,
+  int? transferProgress,
+  int? transferTotal,
+) {
   if (fileName == null) return null;
   final lower = fileName.toLowerCase();
   const exts = [
@@ -213,7 +250,16 @@ AudioItem? parseAudio(String? fileName, String? filePath) {
   ];
   final isAudio = exts.any(lower.endsWith);
   if (!isAudio) return null;
-  return AudioItem(title: fileName, filePath: filePath);
+  final exists = filePath != null && File(filePath).existsSync();
+  return AudioItem(
+    title: fileName,
+    filePath: exists ? filePath : null,
+    fileId: fileId,
+    fileStatusType: fileStatusType,
+    fileSize: fileSize,
+    transferProgress: transferProgress,
+    transferTotal: transferTotal,
+  );
 }
 
 bool closeInTime(DateTime? a, DateTime? b, Duration delta) {

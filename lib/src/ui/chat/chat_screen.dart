@@ -8,6 +8,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
 import '../../../main.dart';
 import '../../data/pin_store.dart';
@@ -16,6 +18,7 @@ import '../../service/tanglex_service.dart' show TanglexService, ImagePayload;
 import '../../stickers/sticker_store.dart' show StickerStore, StickerPack, StickerItem;
 import 'chat_widgets.dart';
 import 'package:just_audio/just_audio.dart';
+import 'audio_player_holder.dart';
 
 class ChatScreen extends ConsumerStatefulWidget {
   final String chatRef;
@@ -42,12 +45,16 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   bool _enableFileReceive = false;
   StreamSubscription<Map<String, dynamic>>? _eventSub;
   Timer? _refreshDebounce;
-  final Map<String, GlobalObjectKey> _messageKeys = {};
-  final AudioPlayer _audioPlayer = AudioPlayer();
+  final AudioPlayer _audioPlayer = AudioPlayerHolder.player;
   AudioNowPlaying? _audioNowPlaying;
+  StreamSubscription<PlayerState>? _audioStateSub;
   final StickerStore _stickerStore = StickerStore.instance;
   final PinStore _pinStore = PinStore.instance;
-  final ScrollController _scrollController = ScrollController();
+  final ItemScrollController _itemScrollController = ItemScrollController();
+  final ItemPositionsListener _itemPositionsListener = ItemPositionsListener.create();
+  final Map<String, int> _displayIndexByKey = {};
+  UiMessage? _replyTo;
+  bool _circleMode = false;
   int _selectedPackIndex = 0;
 
   @override
@@ -56,11 +63,18 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     _loadMessages();
     _pinStore.load();
     _eventSub = ref.read(tanglexServiceProvider).eventStream.listen(_handleEvent);
+    _audioStateSub = _audioPlayer.playerStateStream.listen((state) {
+      if (!mounted) return;
+      if (state.processingState == ProcessingState.completed || state.processingState == ProcessingState.idle) {
+        if (_audioNowPlaying != null) {
+          setState(() => _audioNowPlaying = null);
+        }
+      }
+    });
   }
 
   Future<void> _loadMessages() async {
     setState(() => _loading = true);
-    _messageKeys.clear();
     final service = ref.read(tanglexServiceProvider);
     final msgs = await service.getChatMessages(widget.chatRef);
     final parsed = <UiMessage>[];
@@ -133,12 +147,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final pinCommand = RegExp(r'^/pin\s+');
     final shortPin = RegExp(r'^/p\s+');
     final shouldPin = pinCommand.hasMatch(text) || shortPin.hasMatch(text);
-    final actualText = shouldPin
+    String actualText = shouldPin
         ? text.replaceFirst(pinCommand, '').replaceFirst(shortPin, '')
         : text;
+    final quotedItemId = _replyTo?.itemId;
 
     final service = ref.read(tanglexServiceProvider);
-    final success = await service.sendMessage(widget.chatRef, actualText);
+    final success = await service.sendMessage(widget.chatRef, actualText, quotedItemId: quotedItemId);
 
     if (success && shouldPin) {
       await Future.delayed(const Duration(milliseconds: 500));
@@ -158,7 +173,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       await _loadMessages();
     }
 
-    setState(() => _sending = false);
+    setState(() {
+      _sending = false;
+      _replyTo = null;
+    });
   }
 
   Future<void> _sendImages() async {
@@ -178,8 +196,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         previewMime: preview.mime,
       ));
     }
-    final ok = await service.sendImages(widget.chatRef, payload);
-    if (ok) await _loadMessages();
+    final ok = await service.sendImages(widget.chatRef, payload, quotedItemId: _replyTo?.itemId);
+    if (ok) {
+      await _loadMessages();
+      if (mounted) setState(() => _replyTo = null);
+    }
     setState(() => _sendingMedia = false);
   }
 
@@ -199,9 +220,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       previewBytes: thumb.bytes,
       durationSec: duration,
       isCircle: false,
+      quotedItemId: _replyTo?.itemId,
     );
     if (resultSend.ok) {
       await _loadMessages();
+      if (mounted) setState(() => _replyTo = null);
     } else if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -228,13 +251,16 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     if (path == null) return;
     setState(() => _sendingMedia = true);
     final service = ref.read(tanglexServiceProvider);
+    final stablePath = await _maybePersistPickedFile(path, audioOnly: audioOnly);
     final resultSend = await service.sendFile(
       chatRef: widget.chatRef,
-      filePath: path,
+      filePath: stablePath,
       text: '',
+      quotedItemId: _replyTo?.itemId,
     );
     if (resultSend.ok) {
       await _loadMessages();
+      if (mounted) setState(() => _replyTo = null);
     } else if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -247,6 +273,39 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       );
     }
     setState(() => _sendingMedia = false);
+  }
+
+  Future<String> _maybePersistPickedFile(String path, {required bool audioOnly}) async {
+    final shouldPersist = audioOnly || _isAudioPath(path);
+    if (!shouldPersist) return path;
+    try {
+      final docs = await getApplicationDocumentsDirectory();
+      final dir = Directory('${docs.path}/media_cache');
+      if (!dir.existsSync()) dir.createSync(recursive: true);
+      final ext = _fileExt(path);
+      final target = File('${dir.path}/file_${DateTime.now().millisecondsSinceEpoch}$ext');
+      await File(path).copy(target.path);
+      return target.path;
+    } catch (_) {
+      return path;
+    }
+  }
+
+  bool _isAudioPath(String path) {
+    final lower = path.toLowerCase();
+    return lower.endsWith('.mp3') ||
+        lower.endsWith('.m4a') ||
+        lower.endsWith('.aac') ||
+        lower.endsWith('.wav') ||
+        lower.endsWith('.ogg') ||
+        lower.endsWith('.opus') ||
+        lower.endsWith('.flac');
+  }
+
+  String _fileExt(String path) {
+    final idx = path.lastIndexOf('.');
+    if (idx == -1) return '';
+    return path.substring(idx);
   }
 
   Future<void> _sendSticker(StickerPack pack, StickerItem sticker) async {
@@ -423,14 +482,25 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
   Future<void> _playAudio(AudioItem audio) async {
     if (audio.filePath == null) return;
-    try {
-      if (_audioNowPlaying?.filePath != audio.filePath) {
-        await _audioPlayer.setFilePath(audio.filePath!);
+    if (!File(audio.filePath!).existsSync()) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Аудиофайл недоступен')),
+        );
       }
-      if (_audioPlayer.playing) {
-        await _audioPlayer.pause();
-      } else {
+      return;
+    }
+    try {
+      final isSame = _audioNowPlaying?.filePath == audio.filePath;
+      if (!isSame) {
+        await _audioPlayer.setFilePath(audio.filePath!);
         await _audioPlayer.play();
+      } else {
+        if (_audioPlayer.playing) {
+          await _audioPlayer.pause();
+        } else {
+          await _audioPlayer.play();
+        }
       }
       setState(() {
         _audioNowPlaying = AudioNowPlaying(filePath: audio.filePath!, title: audio.title);
@@ -438,9 +508,22 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     } catch (_) {}
   }
 
+  Future<void> _stopAudio() async {
+    try {
+      await _audioPlayer.stop();
+    } catch (_) {}
+    if (mounted) {
+      setState(() => _audioNowPlaying = null);
+    }
+  }
+
   void _openMedia(List<UiImage> images, int index) {
     final img = images[index];
     if (img.isVideo && !img.isCircle) {
+      if (img.filePath == null) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Файл ещё не загружен')));
+        return;
+      }
       Navigator.of(context).push(
         MaterialPageRoute(
           builder: (_) => VideoPlayerScreen(filePath: img.filePath!),
@@ -455,6 +538,14 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         fullscreenDialog: true,
       ),
     );
+  }
+
+  Future<void> _requestAudioFile(AudioItem audio) async {
+    final fileId = audio.fileId;
+    if (fileId == null) return;
+    final service = ref.read(tanglexServiceProvider);
+    final ok = await service.receiveFile(fileId, approvedRelays: true);
+    if (ok && mounted) await _loadMessages();
   }
 
   Future<void> _openCircleRecorder() async {
@@ -475,9 +566,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       previewBytes: result.previewBytes,
       durationSec: result.durationSec,
       isCircle: true,
+      quotedItemId: _replyTo?.itemId,
     );
     if (resultSend.ok) {
       await _loadMessages();
+      if (mounted) setState(() => _replyTo = null);
     } else if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -527,8 +620,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     });
   }
 
-  List<Widget> _buildDisplayItems(List<UiMessage> messages) {
-    final items = <Widget>[];
+  List<_DisplayEntry> _buildDisplayEntries(List<UiMessage> messages) {
+    _displayIndexByKey.clear();
+    final entries = <_DisplayEntry>[];
     DateTime? lastDate;
     int i = 0;
     while (i < messages.length) {
@@ -537,7 +631,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       if (m.time != null) {
         final msgDate = DateTime(m.time!.year, m.time!.month, m.time!.day);
         if (lastDate == null || msgDate != lastDate) {
-          items.add(DateDivider(date: m.time!));
+          entries.add(_DisplayEntry.date(m.time!));
           lastDate = msgDate;
         }
       }
@@ -562,97 +656,135 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           j++;
         }
         final allImages = group.expand((g) => g.images).toList();
-        items.add(_buildMessageBubble(UiMessage(
-          key: 'group_${m.key}',
-          text: m.text,
-          fromMe: m.fromMe,
-          timeStr: m.timeStr,
-          status: m.status,
-          isSystem: false,
-          images: allImages,
-          time: m.time,
-        )));
+        final entryIndex = entries.length;
+        for (final g in group) {
+          _displayIndexByKey[g.key] = entryIndex;
+        }
+        entries.add(_DisplayEntry.group(
+          UiMessage(
+            key: 'group_${m.key}',
+            text: m.text,
+            fromMe: m.fromMe,
+            timeStr: m.timeStr,
+            status: m.status,
+            isSystem: false,
+            images: allImages,
+            time: m.time,
+          ),
+        ));
         i = j;
         continue;
       }
-      items.add(m.isSystem ? SystemBubble(text: m.text) : _buildMessageBubble(m));
+      if (m.isSystem) {
+        entries.add(_DisplayEntry.system(m));
+      } else {
+        _displayIndexByKey[m.key] = entries.length;
+        entries.add(_DisplayEntry.message(m));
+      }
       i++;
     }
-    return items;
+    return entries;
   }
 
   Widget _buildMessageBubble(UiMessage m) {
     final isPinned = _pinStore.isPinned(widget.chatRef, m.key);
-    final gKey = GlobalObjectKey(m.key);
-    _messageKeys[m.key] = gKey;
-    return KeyedSubtree(
-      key: gKey,
-      child: MessageBubble(
-        message: m,
-        onDownloadImage: _requestFullImage,
-        onOpenMedia: _openMedia,
-        onPlayAudio: _playAudio,
-        isPinned: isPinned,
-        audioPlayer: _audioPlayer,
-        nowPlaying: _audioNowPlaying,
-        onTap: () => _showMessageOptions(context, m, isPinned),
-      ),
+    return MessageBubble(
+      message: m,
+      onDownloadImage: _requestFullImage,
+      onOpenMedia: _openMedia,
+      onPlayAudio: _playAudio,
+      onDownloadAudio: _requestAudioFile,
+      isPinned: isPinned,
+      audioPlayer: _audioPlayer,
+      nowPlaying: _audioNowPlaying,
+      onTapDown: (d, ctx) => _showMessageOptions(ctx, d.globalPosition, m, isPinned),
+      onSwipeReply: () {
+        if (m.itemId == null) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Ответ недоступен')));
+          return;
+        }
+        setState(() => _replyTo = m);
+      },
     );
   }
 
-  void _scrollToMessage(String msgKey) {
-    if (!_scrollController.hasClients) return;
-    final idx = _messages.indexWhere((m) => m.key == msgKey);
-    if (idx < 0) return;
-    final estimatedOffset = idx * 80.0;
-    final maxOffset = _scrollController.position.maxScrollExtent;
-    final target = estimatedOffset.clamp(0.0, maxOffset);
-    _scrollController.animateTo(
-      target,
-      duration: const Duration(milliseconds: 500),
+  Future<void> _scrollToMessage(String msgKey) async {
+    final idx = _displayIndexByKey[msgKey];
+    debugPrint('PIN_SCROLL key=$msgKey index=$idx listLen=${_displayIndexByKey.length}');
+    if (idx == null) {
+      debugPrint('PIN_SCROLL: index not found for key=$msgKey');
+      return;
+    }
+    if (!_itemScrollController.isAttached) {
+      debugPrint('PIN_SCROLL: controller not attached');
+      return;
+    }
+    await _itemScrollController.scrollTo(
+      index: idx,
+      duration: const Duration(milliseconds: 400),
       curve: Curves.easeInOut,
+      alignment: 0.2,
     );
   }
 
-  Future<void> _showMessageOptions(BuildContext ctx, UiMessage m, bool isPinned) async {
-    final renderBox = ctx.findRenderObject() as RenderBox?;
-    if (renderBox == null) return;
-    final position = renderBox.localToGlobal(Offset.zero);
-    final size = renderBox.size;
+  bool _isMessageVisible(String msgKey, Iterable<ItemPosition> positions) {
+    final idx = _displayIndexByKey[msgKey];
+    if (idx == null) return false;
+    for (final p in positions) {
+      if (p.index == idx && p.itemTrailingEdge > 0 && p.itemLeadingEdge < 1) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  Future<void> _showMessageOptions(BuildContext ctx, Offset tapPosition, UiMessage m, bool isPinned) async {
     final screenH = MediaQuery.of(ctx).size.height;
     final screenW = MediaQuery.of(ctx).size.width;
-    final menuW = 200.0;
-    final centerX = position.dx + size.width / 2;
-    final menuY = position.dy < screenH / 2 ? position.dy + size.height : position.dy - 200;
+    final menuW = 210.0;
+    final centerX = tapPosition.dx;
+    final items = <PopupMenuEntry<String>>[];
+    if (m.text.isNotEmpty || m.images.isNotEmpty) {
+      items.add(
+        PopupMenuItem<String>(
+          value: 'pin',
+          child: Row(
+            children: [
+              Icon(isPinned ? Icons.push_pin : Icons.push_pin_outlined, size: 20),
+              const SizedBox(width: 12),
+              Text(isPinned ? 'Открепить' : 'Закрепить'),
+            ],
+          ),
+        ),
+      );
+    }
+    if (m.text.isNotEmpty) {
+      items.add(
+        const PopupMenuItem<String>(
+          value: 'copy',
+          child: Row(children: [Icon(Icons.copy, size: 20), SizedBox(width: 12), Text('Копировать')]),
+        ),
+      );
+    }
+    items.add(
+      const PopupMenuItem<String>(
+        value: 'reply',
+        child: Row(children: [Icon(Icons.reply, size: 20), SizedBox(width: 12), Text('Ответить')]),
+      ),
+    );
+    final menuH = items.length * 48.0 + 8.0;
+    final menuY = tapPosition.dy < screenH / 2 ? tapPosition.dy + 8 : tapPosition.dy - menuH - 8;
 
     await showMenu<String>(
       context: ctx,
       position: RelativeRect.fromSize(
-        Rect.fromLTWH((centerX - menuW / 2).clamp(10.0, screenW - menuW), menuY.clamp(10.0, screenH - 200), menuW, 200),
+        Rect.fromLTWH((centerX - menuW / 2).clamp(10.0, screenW - menuW), menuY.clamp(10.0, screenH - menuH), menuW, menuH),
         Size(screenW, screenH),
       ),
-      items: [
-        if (m.text.isNotEmpty || m.images.isNotEmpty)
-          PopupMenuItem<String>(
-            value: 'pin',
-            child: Row(
-              children: [
-                Icon(isPinned ? Icons.push_pin : Icons.push_pin_outlined, size: 20),
-                const SizedBox(width: 12),
-                Text(isPinned ? 'Открепить' : 'Закрепить'),
-              ],
-            ),
-          ),
-        if (m.text.isNotEmpty)
-          const PopupMenuItem<String>(
-            value: 'copy',
-            child: Row(children: [Icon(Icons.copy, size: 20), SizedBox(width: 12), Text('Копировать')]),
-          ),
-        const PopupMenuItem<String>(
-          value: 'reply',
-          child: Row(children: [Icon(Icons.reply, size: 20), SizedBox(width: 12), Text('Ответить')]),
-        ),
-      ],
+      color: Theme.of(ctx).brightness == Brightness.dark ? const Color(0xFF1E232A) : const Color(0xFFFFFFFF),
+      elevation: 8,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      items: items,
     ).then((String? value) {
       if (value == 'pin') {
         if (isPinned) {
@@ -674,10 +806,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Скопировано')));
         }
       } else if (value == 'reply') {
-        _msgController.text = '> ${m.text.split('\n').first} \n';
-        _msgController.selection = TextSelection.fromPosition(
-          TextPosition(offset: _msgController.text.length),
-        );
+        if (m.itemId == null) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Ответ недоступен')));
+          return;
+        }
+        setState(() => _replyTo = m);
       }
     });
   }
@@ -726,8 +859,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   @override
   void dispose() {
     _msgController.dispose();
-    _audioPlayer.dispose();
-    _scrollController.dispose();
+    _audioStateSub?.cancel();
     _eventSub?.cancel();
     _refreshDebounce?.cancel();
     super.dispose();
@@ -738,13 +870,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final loc = AppLocalizations.of(context);
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final displayItems = _buildDisplayItems(_messages);
+    final displayEntries = _buildDisplayEntries(_messages);
 
-    final chatBackground = isDark ? const Color(0xFF0E0E0E) : theme.colorScheme.surface;
-    final headerBg = isDark ? const Color(0xFF1C1C1D) : theme.colorScheme.surface;
-    final inputBg = isDark ? const Color(0xFF1C1C1D) : theme.colorScheme.surfaceContainerHighest;
-    final textPrimary = isDark ? const Color(0xFFFFFFFF) : theme.colorScheme.onSurface;
-    final textSecondary = isDark ? const Color(0xFF8E8E93) : theme.colorScheme.outline;
+    final chatBackground = isDark ? const Color(0xFF0E1115) : const Color(0xFFE9EDF3);
+    final headerBg = isDark ? const Color(0xFF1B1F26) : const Color(0xFFFFFFFF);
+    final inputBg = isDark ? const Color(0xFF1B1F26) : const Color(0xFFFFFFFF);
+    final textPrimary = isDark ? const Color(0xFFFFFFFF) : const Color(0xFF1D1F23);
+    final textSecondary = isDark ? const Color(0xFF9AA0A6) : const Color(0xFF6B6F76);
 
     return Scaffold(
       backgroundColor: chatBackground,
@@ -784,7 +916,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       body: Column(
         children: [
           if (_audioNowPlaying != null)
-            AudioMiniPlayer(player: _audioPlayer, title: _audioNowPlaying!.title),
+            AudioMiniPlayer(
+              player: _audioPlayer,
+              title: _audioNowPlaying!.title,
+              onClose: _stopAudio,
+            ),
           Expanded(
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
@@ -793,18 +929,36 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                     : Column(
                         children: [
                           if (_pinStore.getPinCount(widget.chatRef) > 0)
-                            PinnedBar(
-                              pinned: _pinStore.getPinned(widget.chatRef),
-                              onPinTap: (pm) => _scrollToMessage(pm.key),
-                              onUnpin: (pm) { _pinStore.unpin(widget.chatRef, pm.key); setState(() {}); },
+                            ValueListenableBuilder<Iterable<ItemPosition>>(
+                              valueListenable: _itemPositionsListener.itemPositions,
+                              builder: (context, positions, _) {
+                                return PinnedBar(
+                                  pinned: _pinStore.getPinned(widget.chatRef),
+                                  onPinTap: (pm) => _scrollToMessage(pm.key),
+                                  onUnpin: (pm) { _pinStore.unpin(widget.chatRef, pm.key); setState(() {}); },
+                                  isPinVisible: (pm) => _isMessageVisible(pm.key, positions),
+                                );
+                              },
                             ),
                           Expanded(
-                            child: ListView.builder(
-                              controller: _scrollController,
+                            child: ScrollablePositionedList.builder(
+                              itemScrollController: _itemScrollController,
+                              itemPositionsListener: _itemPositionsListener,
                               reverse: true,
                               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                              itemCount: displayItems.length,
-                              itemBuilder: (context, index) => displayItems[index],
+                              itemCount: displayEntries.length,
+                              itemBuilder: (context, index) {
+                                final entry = displayEntries[index];
+                                switch (entry.type) {
+                                  case _DisplayEntryType.date:
+                                    return DateDivider(date: entry.date!);
+                                  case _DisplayEntryType.system:
+                                    return SystemBubble(text: entry.message!.text);
+                                  case _DisplayEntryType.group:
+                                  case _DisplayEntryType.message:
+                                    return _buildMessageBubble(entry.message!);
+                                }
+                              },
                             ),
                           ),
                         ],
@@ -821,42 +975,118 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                   ),
                 ),
               ),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.end,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  IconButton(onPressed: _sendingMedia ? null : _openAttachMenu, icon: Icon(Icons.attach_file, color: textSecondary)),
-                  Expanded(
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxHeight: 120),
-                      child: TextField(
-                        controller: _msgController,
-                        style: TextStyle(color: textPrimary),
-                        decoration: InputDecoration(
-                          hintText: loc.translate('message_hint'),
-                          hintStyle: TextStyle(color: textSecondary),
-                          border: InputBorder.none,
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                        ),
-                        maxLines: 4,
-                        minLines: 1,
-                        textCapitalization: TextCapitalization.sentences,
-                        onSubmitted: (_) => _sendMessage(),
+                  if (_replyTo != null)
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 6),
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: isDark ? const Color(0xFF262B32) : const Color(0xFFF1F5F9),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 3,
+                            height: 28,
+                            margin: const EdgeInsets.only(right: 8),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF2AABEE),
+                              borderRadius: BorderRadius.circular(2),
+                            ),
+                          ),
+                          Expanded(
+                            child: Text(
+                              _replyTo!.text.split('\n').first,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(color: textSecondary, fontSize: 12),
+                            ),
+                          ),
+                          IconButton(
+                            onPressed: () => setState(() => _replyTo = null),
+                            icon: Icon(Icons.close, size: 18, color: textSecondary),
+                          ),
+                        ],
                       ),
                     ),
-                  ),
-                  IconButton(onPressed: _sendingMedia ? null : _openStickerPicker, icon: Icon(Icons.emoji_emotions_outlined, color: textSecondary)),
-                  const SizedBox(width: 4),
-                  ValueListenableBuilder(
-                    valueListenable: _msgController,
-                    builder: (context, value, child) {
-                      final hasText = value.text.trim().isNotEmpty;
-                      return IconButton(
-                        onPressed: hasText && !_sending ? _sendMessage : _sendingMedia ? null : _openCircleRecorder,
-                        icon: _sending
-                            ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                            : Icon(hasText ? Icons.send : Icons.mic, color: hasText ? theme.colorScheme.primary : textSecondary),
-                      );
-                    },
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      IconButton(
+                        onPressed: _sendingMedia ? null : _openStickerPicker,
+                        icon: Icon(Icons.emoji_emotions_outlined, color: textSecondary),
+                      ),
+                      Expanded(
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxHeight: 120),
+                          child: TextField(
+                            controller: _msgController,
+                            style: TextStyle(color: textPrimary),
+                            decoration: InputDecoration(
+                              hintText: loc.translate('message_hint'),
+                              hintStyle: TextStyle(color: textSecondary),
+                              filled: true,
+                              fillColor: isDark ? const Color(0xFF2A2F36) : const Color(0xFFF1F5F9),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(18),
+                                borderSide: BorderSide.none,
+                              ),
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                            ),
+                            maxLines: 4,
+                            minLines: 1,
+                            textCapitalization: TextCapitalization.sentences,
+                            onSubmitted: (_) => _sendMessage(),
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: _sendingMedia ? null : _sendImages,
+                        icon: Icon(Icons.photo_camera_outlined, color: textSecondary),
+                      ),
+                      IconButton(
+                        onPressed: _sendingMedia ? null : _openAttachMenu,
+                        icon: Icon(Icons.attach_file, color: textSecondary),
+                      ),
+                      ValueListenableBuilder(
+                        valueListenable: _msgController,
+                        builder: (context, value, child) {
+                          final hasText = value.text.trim().isNotEmpty;
+                          if (hasText) {
+                            return IconButton(
+                              onPressed: _sending ? null : _sendMessage,
+                              icon: _sending
+                                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                                  : Icon(Icons.send, color: theme.colorScheme.primary),
+                            );
+                          }
+                          return GestureDetector(
+                            onTap: () => setState(() => _circleMode = !_circleMode),
+                            onLongPress: _sendingMedia
+                                ? null
+                                : () {
+                                    if (_circleMode) {
+                                      _openCircleRecorder();
+                                    } else {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        const SnackBar(content: Text('Голосовые пока недоступны')),
+                                      );
+                                    }
+                                  },
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                              child: Icon(
+                                _circleMode ? Icons.radio_button_checked : Icons.mic,
+                                color: textSecondary,
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -880,4 +1110,19 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     // Заглушка — реальная генерация в tanglex_service
     return PreviewPayload(bytes: Uint8List(0), mime: 'image/jpeg');
   }
+}
+
+enum _DisplayEntryType { date, system, message, group }
+
+class _DisplayEntry {
+  final _DisplayEntryType type;
+  final UiMessage? message;
+  final DateTime? date;
+
+  const _DisplayEntry._(this.type, {this.message, this.date});
+
+  factory _DisplayEntry.date(DateTime date) => _DisplayEntry._(_DisplayEntryType.date, date: date);
+  factory _DisplayEntry.system(UiMessage message) => _DisplayEntry._(_DisplayEntryType.system, message: message);
+  factory _DisplayEntry.message(UiMessage message) => _DisplayEntry._(_DisplayEntryType.message, message: message);
+  factory _DisplayEntry.group(UiMessage message) => _DisplayEntry._(_DisplayEntryType.group, message: message);
 }

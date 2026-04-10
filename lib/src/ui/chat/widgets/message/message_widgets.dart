@@ -30,20 +30,24 @@ class MessageBubble extends StatelessWidget {
   final void Function(UiImage image) onDownloadImage;
   final void Function(List<UiImage> images, int index) onOpenMedia;
   final void Function(AudioItem audio) onPlayAudio;
+  final void Function(AudioItem audio) onDownloadAudio;
   final bool isPinned;
   final AudioPlayer audioPlayer;
   final AudioNowPlaying? nowPlaying;
-  final VoidCallback? onTap;
+  final void Function(TapDownDetails, BuildContext)? onTapDown;
+  final VoidCallback? onSwipeReply;
 
   const MessageBubble({
     required this.message,
     required this.onDownloadImage,
     required this.onOpenMedia,
     required this.onPlayAudio,
+    required this.onDownloadAudio,
     this.isPinned = false,
     required this.audioPlayer,
     required this.nowPlaying,
-    this.onTap,
+    this.onTapDown,
+    this.onSwipeReply,
   });
 
   @override
@@ -55,10 +59,10 @@ class MessageBubble extends StatelessWidget {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
 
-    final incomingBubble = isDark ? const Color(0xFF2C2C2E) : theme.colorScheme.surfaceContainerHighest;
-    final outgoingBubble = isDark ? const Color(0xFF2C2C2E) : theme.colorScheme.primaryContainer;
-    final textPrimary = isDark ? const Color(0xFFFFFFFF) : theme.colorScheme.onSurface;
-    final textSecondary = isDark ? const Color(0xFF8E8E93) : theme.colorScheme.outline;
+    final incomingBubble = isDark ? const Color(0xFF2B2F36) : const Color(0xFFFFFFFF);
+    final outgoingBubble = isDark ? const Color(0xFF2A3F5F) : const Color(0xFFDDF1FF);
+    final textPrimary = isDark ? const Color(0xFFFFFFFF) : const Color(0xFF1D1F23);
+    final textSecondary = isDark ? const Color(0xFF9AA0A6) : const Color(0xFF6B6F76);
 
     final isVideoOnly = message.images.length == 1 &&
         message.images.first.isVideo &&
@@ -81,7 +85,15 @@ class MessageBubble extends StatelessWidget {
       alignment: fromMe ? Alignment.centerRight : Alignment.centerLeft,
       child: GestureDetector(
         behavior: HitTestBehavior.translucent,
-        onTap: onTap,
+        onTapDown: onTapDown == null ? null : (d) => onTapDown!(d, context),
+        onHorizontalDragEnd: onSwipeReply == null
+            ? null
+            : (d) {
+                final v = d.primaryVelocity ?? 0;
+                if (v.abs() > 250) {
+                  onSwipeReply!();
+                }
+              },
         child: Container(
           margin: const EdgeInsets.symmetric(vertical: 2, horizontal: 6),
           padding: isVideoOnly || isStickerOnly
@@ -102,6 +114,15 @@ class MessageBubble extends StatelessWidget {
                     bottomLeft: Radius.circular(fromMe ? 18 : 4),
                     bottomRight: Radius.circular(fromMe ? 4 : 18),
                   ),
+            boxShadow: hasSticker || isBigEmoji
+                ? null
+                : [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(isDark ? 0.18 : 0.06),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
           ),
           child: Column(
             crossAxisAlignment:
@@ -121,8 +142,11 @@ class MessageBubble extends StatelessWidget {
                   audio: message.audio!,
                   fromMe: fromMe,
                   onPlay: () => onPlayAudio(message.audio!),
+                  onDownload: () => onDownloadAudio(message.audio!),
                   audioPlayer: audioPlayer,
                   nowPlaying: nowPlaying,
+                  textPrimary: textPrimary,
+                  textSecondary: textSecondary,
                 ),
                 const SizedBox(height: 6),
               ],
@@ -137,6 +161,39 @@ class MessageBubble extends StatelessWidget {
                     onDownload: (i) => onDownloadImage(message.images[i]),
                   ),
                 if (text.isNotEmpty) const SizedBox(height: 6),
+              ],
+              if (message.quoted != null) ...[
+                Container(
+                  margin: const EdgeInsets.only(bottom: 6),
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: fromMe
+                        ? const Color(0xFFAEDBFF)
+                        : (isDark ? const Color(0xFF2A2F36) : const Color(0xFFF1F5F9)),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 2,
+                        height: 24,
+                        margin: const EdgeInsets.only(right: 6),
+                        decoration: BoxDecoration(
+                          color: fromMe ? const Color(0xFF2AABEE) : const Color(0xFF7A8694),
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                      Expanded(
+                        child: Text(
+                          message.quoted!.text,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontSize: 12, color: textSecondary),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ],
               if (text.isNotEmpty)
                 isBigEmoji
@@ -618,11 +675,13 @@ class PinnedBar extends StatefulWidget {
   final List<PinnedMessage> pinned;
   final void Function(PinnedMessage) onPinTap;
   final void Function(PinnedMessage) onUnpin;
+  final bool Function(PinnedMessage) isPinVisible;
 
   const PinnedBar({
     required this.pinned,
     required this.onPinTap,
     required this.onUnpin,
+    required this.isPinVisible,
   });
 
   @override
@@ -630,13 +689,11 @@ class PinnedBar extends StatefulWidget {
 }
 
 class _PinnedBarState extends State<PinnedBar> {
-  late PageController _pageCtrl;
   int _currentPage = 0;
 
   @override
   void initState() {
     super.initState();
-    _pageCtrl = PageController();
   }
 
   @override
@@ -645,15 +702,32 @@ class _PinnedBarState extends State<PinnedBar> {
     if (widget.pinned.length != oldWidget.pinned.length) {
       if (_currentPage >= widget.pinned.length) {
         _currentPage = widget.pinned.isEmpty ? 0 : widget.pinned.length - 1;
-        _pageCtrl.jumpToPage(_currentPage);
       }
     }
   }
 
-  @override
-  void dispose() {
-    _pageCtrl.dispose();
-    super.dispose();
+  void _advanceToNext(List<PinnedMessage> pins) {
+    if (pins.isEmpty) return;
+    if (pins.length == 1) {
+      widget.onPinTap(pins.first);
+      return;
+    }
+    final displayIndex = _selectDisplayIndex(pins);
+    final allVisible = widget.isPinVisible(pins[displayIndex]);
+    final nextIndex = allVisible ? (displayIndex + 1) % pins.length : displayIndex;
+    setState(() => _currentPage = nextIndex);
+    widget.onPinTap(pins[nextIndex]);
+  }
+
+  int _selectDisplayIndex(List<PinnedMessage> pins) {
+    if (pins.isEmpty) return 0;
+    for (int i = 0; i < pins.length; i++) {
+      final idx = (_currentPage + i) % pins.length;
+      if (!widget.isPinVisible(pins[idx])) {
+        return idx;
+      }
+    }
+    return _currentPage;
   }
 
   @override
@@ -663,18 +737,19 @@ class _PinnedBarState extends State<PinnedBar> {
     final pins = widget.pinned;
     if (pins.isEmpty) return const SizedBox.shrink();
 
-    final pm = pins[_currentPage];
+    final displayIndex = _selectDisplayIndex(pins);
+    final pm = pins[displayIndex];
     final textColor = isDark ? const Color(0xFF8E8E93) : theme.colorScheme.outline;
-    final lineColor = isDark ? const Color(0xFF636366) : theme.colorScheme.outline;
+    final lineColor = isDark ? const Color(0xFF4EA3F1) : const Color(0xFF2AABEE);
 
     return GestureDetector(
-      onTap: () => widget.onPinTap(pm),
+      onTap: () => _advanceToNext(pins),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
           color: isDark
-              ? const Color(0xFF1C1C1E)
-              : theme.colorScheme.surfaceContainerHighest.withOpacity(0.5),
+              ? const Color(0xFF1E232A)
+              : const Color(0xFFF2F6FA),
           border: Border(
             bottom: BorderSide(
               color: isDark
@@ -731,12 +806,13 @@ class _PinnedBarState extends State<PinnedBar> {
             if (pins.length > 1) ...[
               const SizedBox(width: 6),
               Text(
-                '${_currentPage + 1}/${pins.length}',
+                '${displayIndex + 1}/${pins.length}',
                 style: TextStyle(fontSize: 11, color: textColor),
               ),
               const SizedBox(width: 6),
             ],
             GestureDetector(
+              behavior: HitTestBehavior.opaque,
               onTap: () => widget.onUnpin(pm),
               child: Icon(Icons.close, size: 18, color: textColor),
             ),

@@ -9,6 +9,8 @@ class UiMessage {
   final bool isSystem;
   final List<UiImage> images;
   final DateTime? time;
+  final int? itemId;
+  final QuotedMessage? quoted;
   final AudioItem? audio;
   final String? fileName;
   final int? fileSize;
@@ -23,6 +25,8 @@ class UiMessage {
     required this.isSystem,
     required this.images,
     required this.time,
+    this.itemId,
+    this.quoted,
     this.audio,
     this.fileName,
     this.fileSize,
@@ -36,6 +40,8 @@ class UiImage {
   final int? fileId;
   final int? fileSize;
   final String? fileStatusType;
+  final int? transferProgress;
+  final int? transferTotal;
   final bool isVideo;
   final bool isCircle;
   final bool isSticker;
@@ -48,6 +54,8 @@ class UiImage {
     this.fileId,
     this.fileSize,
     this.fileStatusType,
+    this.transferProgress,
+    this.transferTotal,
     this.isVideo = false,
     this.isCircle = false,
     this.isSticker = false,
@@ -61,10 +69,20 @@ class UiImage {
 class AudioItem {
   final String title;
   final String? filePath;
+  final int? fileId;
+  final String? fileStatusType;
+  final int? fileSize;
+  final int? transferProgress;
+  final int? transferTotal;
 
   const AudioItem({
     required this.title,
     required this.filePath,
+    this.fileId,
+    this.fileStatusType,
+    this.fileSize,
+    this.transferProgress,
+    this.transferTotal,
   });
 }
 
@@ -76,6 +94,12 @@ class AudioNowPlaying {
     required this.filePath,
     required this.title,
   });
+}
+
+class QuotedMessage {
+  final String text;
+
+  const QuotedMessage({required this.text});
 }
 
 class PreviewPayload {

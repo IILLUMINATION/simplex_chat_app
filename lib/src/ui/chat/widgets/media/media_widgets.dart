@@ -37,7 +37,7 @@ class MediaGrid extends StatelessWidget {
       ),
       itemBuilder: (context, index) {
         final img = images[index];
-        final child = img.isSticker
+        Widget child = img.isSticker
             ? StickerView(image: img)
             : img.isVideo && img.isCircle
                 ? VideoCircle(image: img)
@@ -45,42 +45,85 @@ class MediaGrid extends StatelessWidget {
                     ? VideoThumbRect(image: img)
                     : ClipRRect(
                         borderRadius: BorderRadius.circular(12),
-                        child: Stack(
-                          fit: StackFit.expand,
-                          children: [
-                            _buildImage(img),
-                            if (!img.hasFullImage &&
-                                img.fileId != null &&
-                                !fromMe &&
-                                img.fileStatusType == 'rcvInvitation')
-                              Positioned(
-                                right: 6,
-                                bottom: 6,
-                                child: GestureDetector(
-                                  onTap: () => onDownload(index),
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 8,
-                                      vertical: 4,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: Colors.black54,
-                                      borderRadius: BorderRadius.circular(10),
-                                    ),
-                                    child: const Text(
-                                      'HD',
-                                      style: TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                          ],
-                        ),
+                        child: _buildImage(img),
                       );
+
+        final isIncoming = !fromMe;
+        final needsDownload = isIncoming &&
+            !img.hasFullImage &&
+            img.fileId != null &&
+            (img.fileStatusType == 'rcvInvitation' || img.fileStatusType == 'rcvTransfer');
+        final isSending = fromMe && img.fileStatusType == 'sndTransfer';
+        final showProgress = (img.fileStatusType == 'rcvTransfer' || img.fileStatusType == 'sndTransfer') &&
+            (img.transferTotal != null && img.transferTotal! > 0);
+        final progress = showProgress ? (img.transferProgress! / img.transferTotal!) : null;
+        if (needsDownload) {
+          child = Stack(
+            fit: StackFit.expand,
+            children: [
+              child,
+              Container(color: Colors.black26),
+              Center(
+                child: GestureDetector(
+                  onTap: () => onDownload(index),
+                  child: Container(
+                    width: 44,
+                    height: 44,
+                    decoration: const BoxDecoration(
+                      color: Colors.black54,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        SizedBox(
+                          width: 28,
+                          height: 28,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            value: progress,
+                            valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
+                          ),
+                        ),
+                        const Icon(Icons.download, color: Colors.white),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          );
+        } else if (isSending || showProgress) {
+          child = Stack(
+            fit: StackFit.expand,
+            children: [
+              child,
+              Positioned(
+                right: 6,
+                bottom: 6,
+                child: Container(
+                  width: 28,
+                  height: 28,
+                  decoration: const BoxDecoration(
+                    color: Colors.black54,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Center(
+                    child: SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        value: progress,
+                        valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          );
+        }
         return GestureDetector(
           onTap: () => onOpen(index),
           child: child,
