@@ -10,7 +10,7 @@ import 'tanglex_bindings.dart';
 /// High-level wrapper over generated [TanglexBindings].
 ///
 /// Responsibilities:
-/// - loads native library (`libtanglex.so` on Android),
+/// - loads native library (`libsimplex.so` on Android),
 /// - initializes Haskell RTS once via `hs_init`,
 /// - converts Dart strings to native UTF-8 and back,
 /// - frees C strings returned by native functions,
@@ -167,7 +167,7 @@ class TanglexNative {
 
   static ffi.DynamicLibrary _openDynamicLibrary() {
     if (Platform.isAndroid) {
-      return ffi.DynamicLibrary.open('libtanglex.so');
+      return ffi.DynamicLibrary.open('libsimplex.so');
     }
 
     throw UnsupportedError('TanglexNative is configured only for Android now.');
