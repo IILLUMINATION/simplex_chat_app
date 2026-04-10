@@ -1051,6 +1051,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                       ),
                     ),
                   ),
+                  IconButton(
+                    onPressed: _sendingMedia ? null : _openStickerPicker,
+                    icon: Icon(Icons.emoji_emotions_outlined, color: textSecondary),
+                    constraints: const BoxConstraints(),
+                    padding: const EdgeInsets.all(8),
+                  ),
                   const SizedBox(width: 4),
                   ValueListenableBuilder(
                     valueListenable: _msgController,
