@@ -52,16 +52,19 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     final loc = AppLocalizations.of(context);
     final profileAsync = ref.watch(persistedProfileProvider);
 
-    return profileAsync.when(
-      loading: () => const Center(child: CircularProgressIndicator()),
-      error: (_, __) => _buildNoProfile(loc),
-      data: (profile) {
-        if (profile == null && _userData == null) {
-          return _buildNoProfile(loc);
-        }
+    return Scaffold(
+      backgroundColor: const Color(0xFF000000),
+      body: profileAsync.when(
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (_, __) => _buildNoProfile(loc),
+        data: (profile) {
+          if (profile == null && _userData == null) {
+            return _buildNoProfile(loc);
+          }
 
-        return _buildProfileDisplay(profile, loc);
-      },
+          return _buildProfileDisplay(profile, loc);
+        },
+      ),
     );
   }
 
