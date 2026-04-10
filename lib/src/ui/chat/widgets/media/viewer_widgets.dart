@@ -154,6 +154,12 @@ class _GalleryViewState extends State<GalleryView> {
           const SnackBar(content: Text('Сохранено в галерею')),
         );
       }
+    } on MissingPluginException {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Сохранение недоступно. Перезапусти приложение.')),
+        );
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

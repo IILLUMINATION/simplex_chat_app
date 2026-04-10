@@ -320,29 +320,25 @@ class _SwipeReplyWrapperState extends State<SwipeReplyWrapper> with SingleTicker
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(vsync: this, duration: const Duration(milliseconds: 180))
-      ..addListener(() {
-        setState(() {
-          _offset = _anim.value;
-        });
-      });
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
+    _controller = AnimationController(vsync: this, duration: const Duration(milliseconds: 180));
   }
 
   void _animateBack() {
-    _anim = Tween<double>(begin: _offset, end: 0).chain(CurveTween(curve: Curves.easeOut)).animate(_controller);
+    final begin = _offset;
+    _offset = 0;
+    _controller.reset();
+    _anim = Tween<double>(begin: begin, end: 0).chain(CurveTween(curve: Curves.easeOut)).animate(_controller);
     _controller.forward(from: 0);
   }
 
   @override
   Widget build(BuildContext context) {
-    final showReply = _offset.abs() > 8;
-    return GestureDetector(
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        final offset = _controller.isAnimating ? _anim.value : _offset;
+        final showReply = offset.abs() > 8;
+        return GestureDetector(
       behavior: HitTestBehavior.translucent,
       onLongPressStart: widget.onLongPressStart,
       onHorizontalDragUpdate: widget.enabled
@@ -390,12 +386,20 @@ class _SwipeReplyWrapperState extends State<SwipeReplyWrapper> with SingleTicker
               ),
             ),
           Transform.translate(
-            offset: Offset(_offset, 0),
+            offset: Offset(offset, 0),
             child: widget.child,
           ),
         ],
       ),
+        );
+      },
     );
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
   }
 }
 
@@ -405,8 +409,38 @@ class MarkdownTextWidget extends StatelessWidget {
 
   const MarkdownTextWidget({required this.text, required this.textColor});
 
+  static bool _langsRegistered = false;
+  static void _registerLanguages() {
+    if (_langsRegistered) return;
+    final langs = {
+      'dart': dart,
+      'python': python,
+      'py': python,
+      'javascript': javascript,
+      'js': javascript,
+      'typescript': typescript,
+      'ts': typescript,
+      'go': go,
+      'java': java,
+      'kotlin': kotlin,
+      'swift': swift,
+      'rust': rust,
+      'cpp': cpp,
+      'c++': cpp,
+      'c': cpp,
+      'bash': bash,
+      'sh': bash,
+      'shell': bash,
+    };
+    for (final entry in langs.entries) {
+      highlight.highlight.registerLanguage(entry.key, entry.value);
+    }
+    _langsRegistered = true;
+  }
+
   @override
   Widget build(BuildContext context) {
+    _registerLanguages();
     final theme = Theme.of(context);
     final codeBg =
         theme.brightness == Brightness.dark ? const Color(0xFF1E1E1E) : const Color(0xFFF5F5F5);
@@ -974,21 +1008,15 @@ class _PinnedBarState extends State<PinnedBar> {
 
   void _advanceToNext(List<PinnedMessage> pins) {
     if (pins.isEmpty) return;
-    debugPrint('PIN_ADVANCE: pinsCount=${pins.length}');
     if (pins.length == 1) {
-      debugPrint('PIN_ADVANCE: single pin, tapping');
       widget.onPinTap(pins.first);
       return;
     }
-    // _selectDisplayIndex уже выбрал нужный индекс (невидимый или currentPage если виден)
-    // При явном нажатии переключаемся на следующий
     final displayIndex = _selectDisplayIndex(pins);
     final nextIndex = (displayIndex + 1) % pins.length;
-    debugPrint('PIN_ADVANCE: displayIdx=$displayIndex nextIdx=$nextIndex');
     widget.onPinTap(
       pins[nextIndex],
       onComplete: () {
-        debugPrint('PIN_ADVANCE: onComplete, updating currentPage to $nextIndex');
         setState(() => _currentPage = nextIndex);
       },
     );
@@ -996,35 +1024,27 @@ class _PinnedBarState extends State<PinnedBar> {
 
   int _selectDisplayIndex(List<PinnedMessage> pins) {
     if (pins.isEmpty) return 0;
-    debugPrint('PIN_SELECT: currentPage=$_currentPage, pinsCount=${pins.length}');
 
     // Проверяем, все ли пины видимы
     bool allVisible = true;
     for (int i = 0; i < pins.length; i++) {
       if (!widget.isPinVisible(pins[i])) {
         allVisible = false;
-        debugPrint('PIN_SELECT: pin i=$i NOT visible');
         break;
       }
     }
-    if (allVisible) {
-      debugPrint('PIN_SELECT: all visible, selecting idx=0 (latest)');
-      return 0;
-    }
+    if (allVisible) return 0;
 
-    // currentPage виден — не переключаемся (только что прокрутились)
+    // currentPage виден — не переключаемся
     final clampedCurrent = _currentPage.clamp(0, pins.length - 1);
     if (widget.isPinVisible(pins[clampedCurrent])) {
-      debugPrint('PIN_SELECT: currentPage visible, keeping idx=$clampedCurrent');
       return clampedCurrent;
     }
 
     // Ищем первый невидимый
     for (int i = 0; i < pins.length; i++) {
       final idx = (_currentPage + i) % pins.length;
-      debugPrint('PIN_SELECT: checking idx=$idx visible=${widget.isPinVisible(pins[idx])}');
       if (!widget.isPinVisible(pins[idx])) {
-        debugPrint('PIN_SELECT: selected idx=$idx (not visible)');
         return idx;
       }
     }

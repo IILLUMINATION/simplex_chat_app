@@ -135,7 +135,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   UiMessage? _replyTo;
   bool _circleMode = false;
   int _selectedPackIndex = 0;
-  bool _showScrollToBottom = false;
 
   @override
   void initState() {
@@ -848,20 +847,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
   Future<void> _scrollToMessage(String msgKey, {void Function()? onComplete}) async {
     var idx = _displayIndexByKey[msgKey];
-    // Fallback: если ключ начинается с "group_", пробуем без префикса
     if (idx == null && msgKey.startsWith('group_')) {
       final originalKey = msgKey.substring(6);
       idx = _displayIndexByKey[originalKey];
     }
-    debugPrint('PIN_SCROLL key=$msgKey index=$idx listLen=${_displayIndexByKey.length}');
-    if (idx == null) {
-      debugPrint('PIN_SCROLL: index not found for key=$msgKey');
-      return;
-    }
-    if (!_itemScrollController.isAttached) {
-      debugPrint('PIN_SCROLL: controller not attached');
-      return;
-    }
+    if (idx == null) return;
+    if (!_itemScrollController.isAttached) return;
     await _itemScrollController.scrollTo(
       index: idx,
       duration: const Duration(milliseconds: 400),
@@ -898,36 +889,20 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     if (idx == null && msgKey.startsWith('group_')) {
       idx = _displayIndexByKey[msgKey.substring(6)];
     }
-    debugPrint('PIN_VISIBILITY: key=$msgKey resolvedIdx=$idx positionsCount=${positions.length}');
     if (idx == null) return false;
     for (final p in positions) {
       if (p.index == idx && p.itemTrailingEdge > 0 && p.itemLeadingEdge < 1) {
-        debugPrint('PIN_VISIBILITY: VISIBLE idx=$idx leading=${p.itemLeadingEdge} trailing=${p.itemTrailingEdge}');
         return true;
       }
     }
-    debugPrint('PIN_VISIBILITY: NOT VISIBLE idx=$idx');
     return false;
   }
 
-  void _updateScrollToBottomVisibility(Iterable<ItemPosition> positions) {
-    // Показываем кнопку, если пользователь не на дне списка (reverse=true, значит index=0 это дно)
-    // Проверяем, есть ли элементы с index > 0 видимые на экране
-    bool shouldShow = false;
+  bool _shouldShowScrollToBottom(Iterable<ItemPosition> positions) {
     for (final p in positions) {
-      if (p.index > 5) {
-        shouldShow = true;
-        break;
-      }
+      if (p.index > 5) return true;
     }
-    if (shouldShow != _showScrollToBottom) {
-      // Откладываем setState до следующего фрейма, чтобы не вызывать во время build
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) {
-          setState(() => _showScrollToBottom = shouldShow);
-        }
-      });
-    }
+    return false;
   }
 
   Future<void> _scrollToBottom() async {
@@ -1135,20 +1110,40 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                             ValueListenableBuilder<Iterable<ItemPosition>>(
                               valueListenable: _itemPositionsListener.itemPositions,
                               builder: (context, positions, _) {
-                                // Обновляем кнопку прокрутки вниз
-                                _updateScrollToBottomVisibility(positions);
-                                return PinnedBar(
-                                  pinned: _pinStore.getPinned(widget.chatRef).reversed.toList(),
-                                  onPinTap: (pm, {onComplete}) => _scrollToMessage(pm.key, onComplete: onComplete),
-                                  onUnpin: (pm) { _pinStore.unpin(widget.chatRef, pm.key); setState(() {}); },
-                                  isPinVisible: (pm) => _isMessageVisible(pm.key, positions),
+                                final showScrollDown = _shouldShowScrollToBottom(positions);
+                                return Column(
+                                  children: [
+                                    PinnedBar(
+                                      pinned: _pinStore.getPinned(widget.chatRef).reversed.toList(),
+                                      onPinTap: (pm, {onComplete}) => _scrollToMessage(pm.key, onComplete: onComplete),
+                                      onUnpin: (pm) { _pinStore.unpin(widget.chatRef, pm.key); setState(() {}); },
+                                      isPinVisible: (pm) => _isMessageVisible(pm.key, positions),
+                                    ),
+                                    // Кнопка прокрутки вниз — внутри ValueListenableBuilder
+                                    // но над списком, с позиционированием через Stack
+                                    if (showScrollDown)
+                                      SizedBox(
+                                        height: 56,
+                                        child: Align(
+                                          alignment: Alignment.centerRight,
+                                          child: Padding(
+                                            padding: const EdgeInsets.only(right: 12),
+                                            child: FloatingActionButton(
+                                              mini: true,
+                                              backgroundColor: const Color(0xFF2A2D32),
+                                              elevation: 4,
+                                              onPressed: _scrollToBottom,
+                                              child: const Icon(Icons.arrow_downward, size: 20, color: Color(0xFF808080)),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                  ],
                                 );
                               },
                             ),
                           Expanded(
-                            child: Stack(
-                              children: [
-                                ScrollablePositionedList.builder(
+                            child: ScrollablePositionedList.builder(
                                   itemScrollController: _itemScrollController,
                                   itemPositionsListener: _itemPositionsListener,
                                   reverse: true,
@@ -1167,22 +1162,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                                     }
                                   },
                                 ),
-                                // Кнопка прокрутки вниз
-                                if (_showScrollToBottom)
-                                  Positioned(
-                                    right: 12,
-                                    bottom: 12,
-                                    child: FloatingActionButton(
-                                      mini: true,
-                                      backgroundColor: const Color(0xFF2A2D32),
-                                      elevation: 4,
-                                      onPressed: _scrollToBottom,
-                                      child: const Icon(Icons.arrow_downward, size: 20, color: Color(0xFF808080)),
-                                    ),
-                                  ),
-                              ],
                             ),
-                          ),
                         ],
                       ),
           ),
@@ -1201,66 +1181,68 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   if (_replyTo != null)
-                    ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 320),
-                      child: Container(
-                        margin: const EdgeInsets.only(bottom: 6),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF303030),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: const Color(0xFF3A3A3A),
-                            width: 1,
-                          ),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Container(
-                              width: 4,
-                              height: 32,
-                              margin: const EdgeInsets.only(left: 8, right: 8),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF5A9CF5),
-                                borderRadius: BorderRadius.circular(2),
-                              ),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: IntrinsicWidth(
+                        child: Container(
+                          margin: const EdgeInsets.only(bottom: 6),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF303030),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: const Color(0xFF3A3A3A),
+                              width: 1,
                             ),
-                            Flexible(
-                              child: Padding(
-                                padding: const EdgeInsets.fromLTRB(4, 6, 4, 6),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Text(
-                                      _replyTo!.fromMe ? 'Вы' : widget.chatName,
-                                      style: const TextStyle(
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w600,
-                                        color: Color(0xFF5A9CF5),
-                                      ),
-                                    ),
-                                    const SizedBox(height: 2),
-                                    Text(
-                                      _replyTo!.text.split('\n').first,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(
-                                        color: textPrimary,
-                                        fontSize: 13,
-                                      ),
-                                    ),
-                                  ],
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Container(
+                                width: 3,
+                                height: 24,
+                                margin: const EdgeInsets.only(left: 8, right: 8),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF5A9CF5),
+                                  borderRadius: BorderRadius.circular(2),
                                 ),
                               ),
-                            ),
-                            IconButton(
-                              onPressed: () => setState(() => _replyTo = null),
-                              icon: Icon(Icons.close, size: 18, color: textSecondary),
-                              padding: const EdgeInsets.all(6),
-                              constraints: const BoxConstraints(),
-                            ),
-                          ],
+                              Flexible(
+                                child: Padding(
+                                  padding: const EdgeInsets.fromLTRB(0, 6, 8, 6),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text(
+                                        _replyTo!.fromMe ? 'Вы' : widget.chatName,
+                                        style: const TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w600,
+                                          color: Color(0xFF5A9CF5),
+                                        ),
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        _replyTo!.text.split('\n').first,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          color: textPrimary,
+                                          fontSize: 13,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                              IconButton(
+                                onPressed: () => setState(() => _replyTo = null),
+                                icon: Icon(Icons.close, size: 16, color: textSecondary),
+                                padding: const EdgeInsets.all(4),
+                                constraints: const BoxConstraints(),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     ),

@@ -161,10 +161,8 @@ class AudioBubble extends StatelessWidget {
         audio.fileStatusType == 'rcvInvitation' &&
         audio.fileSize == null;
     final isMissing = !canPlay && audio.fileId != null && !fromMe && !awaitingSender;
-    final showProgress = (audio.fileStatusType == 'rcvTransfer' ||
-            audio.fileStatusType == 'rcvAccepted' ||
-            audio.fileStatusType == 'sndTransfer') &&
-        (audio.transferTotal != null && audio.transferTotal! > 0) &&
+    final showProgress = audio.transferTotal != null &&
+        audio.transferTotal! > 0 &&
         audio.transferProgress != null;
     final progress = showProgress ? (audio.transferProgress! / audio.transferTotal!) : null;
     final playBtnBg = fromMe

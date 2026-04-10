@@ -49,24 +49,23 @@ class MediaGrid extends StatelessWidget {
                       );
 
         final isIncoming = !fromMe;
-        final needsDownload = isIncoming &&
-            !img.hasFullImage &&
-            img.fileId != null &&
-            img.fileStatusType == 'rcvInvitation' &&
-            !awaitingSender;
         final awaitingSender = isIncoming &&
             !img.hasFullImage &&
             img.fileId != null &&
             img.fileStatusType == 'rcvInvitation' &&
             img.fileSize == null;
+        final showProgress = img.transferTotal != null &&
+            img.transferTotal! > 0 &&
+            img.transferProgress != null;
+        final needsDownload = isIncoming &&
+            !img.hasFullImage &&
+            img.fileId != null &&
+            img.fileStatusType == 'rcvInvitation' &&
+            !awaitingSender &&
+            !showProgress;
         final isDownloading = isIncoming &&
             (img.fileStatusType == 'rcvTransfer' || img.fileStatusType == 'rcvAccepted');
         final isSending = fromMe && img.fileStatusType == 'sndTransfer';
-        final showProgress = (img.fileStatusType == 'rcvTransfer' ||
-                img.fileStatusType == 'rcvAccepted' ||
-                img.fileStatusType == 'sndTransfer') &&
-            (img.transferTotal != null && img.transferTotal! > 0) &&
-            img.transferProgress != null;
         final progress = showProgress ? (img.transferProgress! / img.transferTotal!) : null;
         if (awaitingSender) {
           child = Stack(
@@ -101,7 +100,7 @@ class MediaGrid extends StatelessWidget {
               ),
             ],
           );
-        } else if (isDownloading) {
+        } else if (isDownloading || showProgress) {
           child = Stack(
             fit: StackFit.expand,
             children: [
