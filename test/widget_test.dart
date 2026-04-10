@@ -7,13 +7,13 @@
 
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:simplex_chat_app/main.dart';
+import 'package:tanglex_chat/main.dart';
 
 void main() {
-  testWidgets('shows simplex test screen', (WidgetTester tester) async {
-    await tester.pumpWidget(const SimplexApp());
+  testWidgets('shows tanglex test screen', (WidgetTester tester) async {
+    await tester.pumpWidget(const TangleXApp());
 
-    expect(find.text('SimpleX Core Test'), findsOneWidget);
+    expect(find.text('TangleX Chat'), findsOneWidget);
     expect(find.text('Init Core'), findsOneWidget);
     expect(find.text('Send Test Command'), findsOneWidget);
   });

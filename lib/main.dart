@@ -5,22 +5,22 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'src/localization/app_localizations.dart';
 import 'src/providers/locale_provider.dart';
 import 'src/providers/theme_provider.dart';
-import 'src/service/simplex_service.dart';
+import 'src/service/tanglex_service.dart';
 import 'src/ui/home_screen.dart';
 
-// Global provider so all screens share the same SimplexService
-final simplexServiceProvider = Provider<SimplexService>((ref) {
-  final service = SimplexService();
+// Global provider so all screens share the same TanglexService
+final tanglexServiceProvider = Provider<TanglexService>((ref) {
+  final service = TanglexService();
   ref.onDispose(() => service.dispose());
   return service;
 });
 
 void main() {
-  runApp(const ProviderScope(child: SimplexApp()));
+  runApp(const ProviderScope(child: TangleXApp()));
 }
 
-class SimplexApp extends ConsumerWidget {
-  const SimplexApp({super.key});
+class TangleXApp extends ConsumerWidget {
+  const TangleXApp({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -30,7 +30,7 @@ class SimplexApp extends ConsumerWidget {
     final locale = AppLocale.fromCode(localeConfig.locale);
 
     return MaterialApp(
-      title: 'SimpleX Chat',
+      title: 'TangleX Chat',
       debugShowCheckedModeBanner: false,
       themeMode: AppThemeMode.fromName(themeConfig.mode).flutterMode,
       theme: notifier.lightTheme,

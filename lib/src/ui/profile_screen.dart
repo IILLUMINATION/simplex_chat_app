@@ -25,7 +25,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   }
 
   Future<void> _loadUserData() async {
-    final service = ref.read(simplexServiceProvider);
+    final service = ref.read(tanglexServiceProvider);
     if (!service.isInitialized) return;
     final user = await service.getUser();
     final users = await service.getUsers();
@@ -79,7 +79,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             const SizedBox(height: 24),
             Consumer(
               builder: (context, ref, _) {
-                final service = ref.watch(simplexServiceProvider);
+                final service = ref.watch(tanglexServiceProvider);
                 return FilledButton.icon(
                   onPressed: () async {
                     await Navigator.push(
@@ -190,7 +190,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 context,
                 MaterialPageRoute(
                   builder: (_) => CreateProfileScreen(
-                    service: ref.read(simplexServiceProvider),
+                    service: ref.read(tanglexServiceProvider),
                   ),
                 ),
               );
@@ -255,7 +255,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       builder: (context) => AlertDialog(
         title: const Text('Delete profile?'),
         content: const Text(
-          'This will delete the active user profile in the SimpleX core. '
+          'This will delete the active user profile in the TangleX core. '
           'You can create a new one after.',
         ),
         actions: [
@@ -274,7 +274,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     if (ok != true) return;
 
     setState(() => _busy = true);
-    final service = ref.read(simplexServiceProvider);
+    final service = ref.read(tanglexServiceProvider);
     final success = await service.deleteUser(userId);
     if (success) {
       await clearProfileData();
@@ -299,7 +299,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
 
   Future<void> _switchUser(int userId) async {
     setState(() => _busy = true);
-    final service = ref.read(simplexServiceProvider);
+    final service = ref.read(tanglexServiceProvider);
     final success = await service.setActiveUser(userId);
     if (success) {
       await _loadUserData();

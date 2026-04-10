@@ -1,12 +1,12 @@
-# 🟢 SimpleX Chat Client — Custom Flutter Edition
+# 🟢 TangleX Chat
 
-> Приватный мессенджер без серверов, без ID, без компромиссов. Кастомный клиент с прямым FFI-доступом к ядру SimpleX.
+> Приватный мессенджер без серверов, без ID, без компромиссов. Независимый клиент с прямым FFI-доступом к протоколу SimpleX.
 
 [![Flutter](https://img.shields.io/badge/Flutter-3.11+-02569B?logo=flutter&logoColor=white)](https://flutter.dev)
 [![Dart](https://img.shields.io/badge/Dart-3.11+-0175C2?logo=dart&logoColor=white)](https://dart.dev)
 [![License: AGPL](https://img.shields.io/badge/License-AGPL--3.0-green.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![Platform](https://img.shields.io/badge/Platform-Android-3DDC84?logo=android)](https://www.android.com)
-[![SimpleX](https://img.shields.io/badge/Protocol-SimpleX-6B4CFF)](https://simplex.chat)
+[![Protocol](https://img.shields.io/badge/Protocol-SimpleX-6B4CFF)](https://simplex.chat)
 
 ---
 
@@ -22,6 +22,7 @@
 - [Структура проекта](#-структура-проекта)
 - [Платформы](#-платформы)
 - [Известные ограничения](#-известные-ограничения)
+- [Правовая информация](#-правовая-информация)
 - [Вклад в проект](#-вклад-в-проект)
 - [Лицензия](#-лицензия)
 
@@ -29,7 +30,9 @@
 
 ## 🚀 О проекте
 
-Это **кастомный клиент SimpleX Chat**, написанный на Flutter с **прямым FFI-доступом** к нативному ядру SimpleX (`libsimplex.so`). В отличие от стандартного клиента, который работает через REST API или SDK, этот клиент вызывает Haskell-ядро напрямую через `dart:ffi`, минуя все сетевые прослойки.
+**TangleX Chat** — это **независимый** кастомный клиент, работающий по протоколу **SimpleX**. Приложение использует **прямой FFI-доступ** к нативному ядру SimpleX (`libsimplex.so`), вызывая Haskell-ядро напрямую через `dart:ffi`, минуя все сетевые прослойки.
+
+> ⚖️ **TangleX Chat** не является официальным продуктом SimpleX Chat Ltd. Название, логотип и брендинг TangleX Chat не связаны с товарными знаками SimpleX. Подробнее см. [DISCLAIMER.md](DISCLAIMER.md).
 
 **Результат?** Минимальные задержки, полный контроль над взаимодействием с протоколом и возможность кастомизации, недоступная при использовании официального SDK.
 
@@ -39,14 +42,14 @@
 
 ### ⚡ Прямой FFI-вызов ядра
 
-| Параметр | Оригинальный клиент (через API/SDK) | Этот клиент (FFI) |
+| Параметр | Клиент через API/SDK | TangleX Chat (FFI) |
 |:--------:|:-----------------------------------:|:-----------------:|
- | Вызовы | Через IPC / HTTP-слой | Напрямую в `dart:ffi` |
+| Вызовы | Через IPC / HTTP-слой | Напрямую в `dart:ffi` |
 | Задержка | +оверхед IPC/сериализации | Минимальная |
 | Зависимости | Внешний процесс/сервис | Встроенное ядро |
 | Контроль | Ограничен публичным API | Полный доступ к командам |
 
-### 🎨 Уникальные функции, отсутствующие в оригинале
+### 🎨 Уникальные функции
 
 | Функция | Описание |
 |---------|----------|
@@ -54,7 +57,7 @@
 | 🖼 **Система стикеров** | Импорт `.sxpz`/`.zip` паков, создание своих паков, анимированные `.webm` стикеры с автосжатием превью |
 | 🎨 **4 темы оформления** | Material, Nord, AMOLED (чистый чёрный), Solarized — с переключением светлой/тёмной/системной |
 | 🌐 **Двуязычный интерфейс** | Русский 🇷🇺 + English 🇬🇧 — легковесная локализация без ARB-файлов |
-| 🐛 **Debug-консоль** | Прямой ввод JSON-команд к ядру SimpleX в реальном времени с лог-стримом |
+| 🐛 **Debug-консоль** | Прямой ввод JSON-команд к ядру в реальном времени с лог-стримом |
 | 🖼 **HD-загрузка с контролем** | Переключатель качества изображений с предупреждением о стабильности |
 | 📎 **Мини-плеер аудио** | Встроенный плеер для голосовых сообщений прямо в чате |
 | 🗂 **Медиа-галерея** | Просмотр всех медиа чата с группировкой изображений |
@@ -63,7 +66,7 @@
 
 ```
 ┌─────────────────────────────────────────────┐
-│               Flutter UI (Material 3)        │
+│           Flutter UI — TangleX (Material 3)  │
 │  ┌───────────┬───────────┬──────────────┐   │
 │  │  Чаты     │ Коннект   │  Профиль     │   │
 │  └───────────┴───────────┴──────────────┘   │
@@ -71,17 +74,18 @@
 │         Riverpod State Management            │
 │  (тема · локаль · профиль · сервис)         │
 ├─────────────────────────────────────────────┤
-│        SimplexService (бизнес-логика)       │
+│        TanglexService (бизнес-логика)       │
 │  ┌─────────────────────────────────────┐    │
 │  │  Event Loop (Isolate)               │    │
 │  │  chat_recv_msg_wait ←→ SendPort     │    │
 │  └─────────────────────────────────────┘    │
 ├─────────────────────────────────────────────┤
 │      FFI Layer (dart:ffi + ffigen)         │
-│  simplex_native.dart → libsimplex.so       │
+│  TanglexNative → libsimplex.so             │
 ├─────────────────────────────────────────────┤
 │       Haskell SimpleX Core (C API)          │
 │  hs_init · chat_send_cmd · chat_recv_msg    │
+│  © SimpleX Chat Ltd — AGPL-3.0              │
 └─────────────────────────────────────────────┘
 ```
 
@@ -149,7 +153,7 @@ chat_migrate_init_key → Инициализация/миграция ядра
 chat_send_cmd_retry  → Отправка JSON-команды
 chat_recv_msg_wait   → Блокирующий приём событий
 chat_encrypt_media   → Шифрование медиа
-chat_decrypt_media   → Дешифровка медиа
+chat_decrypt_media   → Дешифрование медиа
 chat_write_file      → Запись файла через ядро
 chat_read_file       → Чтение файла через ядро
 ```
@@ -159,7 +163,7 @@ chat_read_file       → Чтение файла через ядро
 События от ядра принимаются в **выделенном Dart Isolate**, чтобы не блокировать UI-поток:
 
 ```dart
-// simplex_event_loop — изолированный цикл событий
+// tanglex_event_loop — изолированный цикл событий
 chat_recv_msg_wait(chat_ctrl) → SendPort → ReceivePort → UI
 ```
 
@@ -202,8 +206,8 @@ chat_recv_msg_wait(chat_ctrl) → SendPort → ReceivePort → UI
 
 ```bash
 # 1. Клонировать репозиторий
-git clone https://github.com/your-username/simplex_chat_app.git
-cd simplex_chat_app
+git clone https://github.com/your-username/tanglex_chat.git
+cd tanglex_chat
 
 # 2. Установить зависимости
 flutter pub get
@@ -253,15 +257,15 @@ ndkVersion = "28.2.13676358"
 ## 📁 Структура проекта
 
 ```
-simplex_chat_app/
+tanglex_chat/
 ├── lib/
 │   ├── main.dart                          # Точка входа, ProviderScope
 │   └── src/
 │       ├── ffi/
-│       │   ├── simplex_bindings.dart      # Автогенерация (ffigen)
-│       │   └── simplex_native.dart        # FFI-обёртка, Event Loop
+│       │   ├── tanglex_bindings.dart      # Автогенерация (ffigen)
+│       │   └── tanglex_native.dart        # FFI-обёртка, Event Loop
 │       ├── service/
-│       │   └── simplex_service.dart       # Бизнес-логика, команды
+│       │   └── tanglex_service.dart       # Бизнес-логика, команды
 │       ├── ui/
 │       │   ├── home_screen.dart           # Навигация: Чаты / Коннект / Профиль
 │       │   ├── chats_screen.dart          # Список чатов, запросы
@@ -280,12 +284,14 @@ simplex_chat_app/
 │       └── localization/
 │           └── app_localizations.dart     # en/ru переводы
 ├── native/
-│   └── simplex.h                          # C API заголовки
+│   └── simplex.h                          # C API заголовки (© SimpleX Chat Ltd)
 ├── android/                               # Android-проект
 ├── ios/                                   # iOS-заготовка
 ├── linux/                                 # Linux-заготовка
 ├── macos/                                 # macOS-заготовка
 ├── ffigen.yaml                            # Конфигурация ffigen
+├── DISCLAIMER.md                          # Правовая информация
+├── LICENSE                                # AGPL-3.0
 └── pubspec.yaml                           # Зависимости
 ```
 
@@ -308,12 +314,25 @@ simplex_chat_app/
 
 | Ограничение | Описание |
 |-------------|----------|
-| **FFI только на Android** | `SimplexNative` бросает `UnsupportedError` на не-Android платформах |
+| **FFI только на Android** | `TanglexNative` бросает `UnsupportedError` на не-Android платформах |
 | **Групповые чаты** | UI готов, но обработка ограничена («This chat is not ready yet») |
 | **Нет QR-сканера** | Подключение только через ручной ввод/вставку `smp://` ссылки |
 | **Нет пуш-уведомлений** | Event Loop — polling через `chat_recv_msg_wait`; нет FCM/APNs |
 | **HD-приём нестабилен** | Предупреждение: «can crash native core» для больших файлов |
 | **Share-кнопка** | TODO: не реализован шаринг ссылки |
+
+---
+
+## ⚖️ Правовая информация
+
+**TangleX Chat** — независимый проект, **не аффилированный** с SimpleX Chat Ltd.
+
+- Протокол SimpleX и ядро `libsimplex.so` разработаны [SimpleX Chat Ltd.](https://simplex.chat) и распространяются под лицензией **AGPL-3.0**
+- Товарные знаки **SimpleX** и **SimpleX Chat** принадлежат SimpleX Chat Ltd.
+- TangleX Chat использует собственное название и брендинг в соответствии с [политикой товарных знаков SimpleX](https://github.com/simplex-chat/simplex-chat/blob/master/docs/TRADEMARK.md)
+- Все копирайты и лицензии оригинального SimpleX-кода сохранены в подкаталоге `simplex-chat/`
+
+Подробности: [DISCLAIMER.md](DISCLAIMER.md)
 
 ---
 
@@ -330,12 +349,14 @@ Pull Request'ы приветствуются! Для крупных измене
 
 ## 📄 Лицензия
 
-Этот проект распространяется под лицензией **AGPL-3.0**. См. файл [LICENSE](LICENSE) для подробностей.
+Этот проект распространяется под лицензией **GNU Affero General Public License v3.0 (AGPL-3.0)**.
 
-SimpleX Chat и протокол SimpleX являются проектами с открытым исходным кодом, разработанными [SimpleX Chat Ltd.](https://simplex.chat)
+Полный текст лицензии см. в файле [LICENSE](LICENSE).
+
+Ядро SimpleX Chat (каталог `simplex-chat/`) также лицензировано под AGPL-3.0 © SimpleX Chat Ltd.
 
 ---
 
 <p align="center">
-  <sub>Сделано с 💚 на Flutter & Dart FFI</sub>
+  <sub>Сделано с 💚 на Flutter & Dart FFI · TangleX Chat © 2026</sub>
 </p>

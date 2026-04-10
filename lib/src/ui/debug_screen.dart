@@ -25,7 +25,7 @@ class _DebugScreenWrapperState extends ConsumerState<DebugScreenWrapper> {
     if (_initializing) return;
     _initializing = true;
     try {
-      final service = ref.read(simplexServiceProvider);
+      final service = ref.read(tanglexServiceProvider);
       if (!service.isInitialized) {
         await service.initialize();
       }
@@ -41,7 +41,7 @@ class _DebugScreenWrapperState extends ConsumerState<DebugScreenWrapper> {
     if (cmd.isEmpty) return;
     _cmdController.clear();
 
-    final service = ref.read(simplexServiceProvider);
+    final service = ref.read(tanglexServiceProvider);
     await service.sendCommand(cmd);
   }
 
@@ -54,7 +54,7 @@ class _DebugScreenWrapperState extends ConsumerState<DebugScreenWrapper> {
   @override
   Widget build(BuildContext context) {
     final loc = AppLocalizations.of(context);
-    final service = ref.watch(simplexServiceProvider);
+    final service = ref.watch(tanglexServiceProvider);
 
     return Scaffold(
       appBar: AppBar(

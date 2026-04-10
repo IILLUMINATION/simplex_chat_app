@@ -37,7 +37,7 @@ class _ConnectScreenState extends ConsumerState<ConnectScreen>
     final link = _linkController.text.trim();
     if (link.isEmpty) return;
 
-    final service = ref.read(simplexServiceProvider);
+    final service = ref.read(tanglexServiceProvider);
     if (!service.isInitialized) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -72,7 +72,7 @@ class _ConnectScreenState extends ConsumerState<ConnectScreen>
 
   Future<void> _createMyLink() async {
     setState(() => _loadingLink = true);
-    final service = ref.read(simplexServiceProvider);
+    final service = ref.read(tanglexServiceProvider);
 
     if (!service.isInitialized) {
       if (mounted) {

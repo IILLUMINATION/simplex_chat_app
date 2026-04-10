@@ -5,23 +5,23 @@ import 'dart:io' show Platform;
 
 import 'package:ffi/ffi.dart';
 
-import 'simplex_bindings.dart';
+import 'tanglex_bindings.dart';
 
-/// High-level wrapper over generated [SimplexBindings].
+/// High-level wrapper over generated [TanglexBindings].
 ///
 /// Responsibilities:
-/// - loads native library (`libsimplex.so` on Android),
+/// - loads native library (`libtanglex.so` on Android),
 /// - initializes Haskell RTS once via `hs_init`,
 /// - converts Dart strings to native UTF-8 and back,
 /// - frees C strings returned by native functions,
 /// - runs blocking receive loop in a dedicated isolate.
-class SimplexNative {
-  SimplexNative({ffi.DynamicLibrary? dynamicLibrary})
+class TanglexNative {
+  TanglexNative({ffi.DynamicLibrary? dynamicLibrary})
     : _providedLibrary = dynamicLibrary;
 
   final ffi.DynamicLibrary? _providedLibrary;
   late final ffi.DynamicLibrary _library = _providedLibrary ?? _openDynamicLibrary();
-  late final SimplexBindings _bindings = SimplexBindings(_library);
+  late final TanglexBindings _bindings = TanglexBindings(_library);
 
   static bool _hsInitialized = false;
 
@@ -53,7 +53,7 @@ class SimplexNative {
   /// Exposes raw controller address to pass across isolates.
   int? get chatControllerAddress => _chatController?.address;
 
-  /// Initializes SimpleX core and captures `chat_ctrl` from `chat_migrate_init_key`.
+  /// Initializes TangleX core and captures `chat_ctrl` from `chat_migrate_init_key`.
   ///
   /// Returns JSON string provided by native function.
   ///
@@ -62,7 +62,7 @@ class SimplexNative {
   Future<String> migrateInitKey({required String path, String confirm = 'yesUp'}) async {
     await init();
 
-    const strongPass = 'Simplex_Strong_Password_12345!!!';
+    const strongPass = 'Tanglex_Strong_Password_12345!!!';
     final pathPtr = path.toNativeUtf8();
     final passPtr = strongPass.toNativeUtf8();
     final confirmPtr = confirm.toNativeUtf8();
@@ -106,7 +106,7 @@ class SimplexNative {
     return _takeCStringAndFreeStatic(ptr);
   }
 
-  /// Sends JSON command into SimpleX core and returns JSON response.
+  /// Sends JSON command into TangleX core and returns JSON response.
   ///
   /// Uses [Future.microtask] so call site is async-friendly and does not block
   /// UI scheduling directly.
@@ -144,7 +144,7 @@ class SimplexNative {
         'chatCtrlAddress': ctrlAddress,
         'waitSeconds': waitSeconds,
       },
-      debugName: 'simplex_event_loop',
+      debugName: 'tanglex_event_loop',
     );
   }
 
@@ -167,10 +167,10 @@ class SimplexNative {
 
   static ffi.DynamicLibrary _openDynamicLibrary() {
     if (Platform.isAndroid) {
-      return ffi.DynamicLibrary.open('libsimplex.so');
+      return ffi.DynamicLibrary.open('libtanglex.so');
     }
 
-    throw UnsupportedError('SimplexNative is configured only for Android now.');
+    throw UnsupportedError('TanglexNative is configured only for Android now.');
   }
 
   static String _takeCStringAndFreeStatic(ffi.Pointer<ffi.Char> ptr) {
@@ -190,7 +190,7 @@ class SimplexNative {
     final chatCtrlAddress = args['chatCtrlAddress']! as int;
     final waitSeconds = args['waitSeconds']! as int;
 
-    final bindings = SimplexBindings(_openDynamicLibrary());
+    final bindings = TanglexBindings(_openDynamicLibrary());
     final chatCtrl = ffi.Pointer<ffi.Void>.fromAddress(chatCtrlAddress);
 
     while (true) {

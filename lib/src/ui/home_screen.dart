@@ -36,7 +36,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     if (_coreInitializing) return;
     _coreInitializing = true;
     try {
-      final service = ref.read(simplexServiceProvider);
+      final service = ref.read(tanglexServiceProvider);
       if (!service.isInitialized) {
         await service.initialize();
       }

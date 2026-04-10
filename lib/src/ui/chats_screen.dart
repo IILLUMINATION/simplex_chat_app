@@ -7,7 +7,7 @@ import 'package:intl/intl.dart';
 import '../../main.dart';
 import '../localization/app_localizations.dart';
 import '../providers/persistent_store.dart';
-import '../service/simplex_service.dart';
+import '../service/tanglex_service.dart';
 import 'chat_screen.dart';
 import 'create_profile_screen.dart';
 
@@ -42,7 +42,7 @@ class _ChatsScreenState extends ConsumerState<ChatsScreen> {
   }
 
   void _listenEvents() {
-    final service = ref.read(simplexServiceProvider);
+    final service = ref.read(tanglexServiceProvider);
     _eventSub = service.eventStream.listen((event) {
       final result = event['result'];
       if (result is Map) {
@@ -80,7 +80,7 @@ class _ChatsScreenState extends ConsumerState<ChatsScreen> {
     if (_loading) return;
     setState(() => _loading = true);
 
-    final service = ref.read(simplexServiceProvider);
+    final service = ref.read(tanglexServiceProvider);
     if (!service.isInitialized) {
       setState(() {
         _loading = false;
@@ -97,7 +97,7 @@ class _ChatsScreenState extends ConsumerState<ChatsScreen> {
   }
 
   Future<void> _loadRequests() async {
-    final service = ref.read(simplexServiceProvider);
+    final service = ref.read(tanglexServiceProvider);
     if (!service.isInitialized) return;
     final requests = await service.getContactRequests();
     if (!mounted) return;
@@ -116,7 +116,7 @@ class _ChatsScreenState extends ConsumerState<ChatsScreen> {
   @override
   Widget build(BuildContext context) {
     final loc = AppLocalizations.of(context);
-    final service = ref.watch(simplexServiceProvider);
+    final service = ref.watch(tanglexServiceProvider);
     final profileAsync = ref.watch(persistedProfileProvider);
     final requestsFromChats = _chats
         .where((c) => c.chatType == 'contactRequest')
@@ -214,7 +214,7 @@ class _ChatsScreenState extends ConsumerState<ChatsScreen> {
     );
   }
 
-  Widget _buildNotInitialized(SimplexService service) {
+  Widget _buildNotInitialized(TanglexService service) {
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -242,7 +242,7 @@ class _ChatsScreenState extends ConsumerState<ChatsScreen> {
     );
   }
 
-  Widget _buildEmpty(AppLocalizations loc, SimplexService service) {
+  Widget _buildEmpty(AppLocalizations loc, TanglexService service) {
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -299,7 +299,7 @@ class _ChatsScreenState extends ConsumerState<ChatsScreen> {
 
   Future<void> _acceptRequest(ContactRequestPreview chat) async {
     final reqId = chat.contactRequestId;
-    final service = ref.read(simplexServiceProvider);
+    final service = ref.read(tanglexServiceProvider);
     final ok = await service.acceptContactRequest(reqId);
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -318,7 +318,7 @@ class _ChatsScreenState extends ConsumerState<ChatsScreen> {
 
   Future<void> _rejectRequest(ContactRequestPreview chat) async {
     final reqId = chat.contactRequestId;
-    final service = ref.read(simplexServiceProvider);
+    final service = ref.read(tanglexServiceProvider);
     final ok = await service.rejectContactRequest(reqId);
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(

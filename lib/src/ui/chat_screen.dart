@@ -16,7 +16,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:just_audio/just_audio.dart';
 
 import '../../main.dart';
-import '../service/simplex_service.dart';
+import '../service/tanglex_service.dart';
 import '../stickers/sticker_store.dart';
 
 class ChatScreen extends ConsumerStatefulWidget {
@@ -57,7 +57,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     _loadMessages();
     _loadStickers();
     _eventSub =
-        ref.read(simplexServiceProvider).eventStream.listen(_handleEvent);
+        ref.read(tanglexServiceProvider).eventStream.listen(_handleEvent);
   }
 
   Future<void> _loadStickers() async {
@@ -69,7 +69,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
   Future<void> _loadMessages() async {
     setState(() => _loading = true);
-    final service = ref.read(simplexServiceProvider);
+    final service = ref.read(tanglexServiceProvider);
     final msgs = await service.getChatMessages(widget.chatRef);
     final parsed = <_UiMessage>[];
     for (final raw in msgs) {
@@ -96,7 +96,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     _msgController.clear();
     setState(() => _sending = true);
 
-    final service = ref.read(simplexServiceProvider);
+    final service = ref.read(tanglexServiceProvider);
     final success = await service.sendMessage(widget.chatRef, text);
 
     if (success) {
@@ -112,7 +112,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final files = await picker.pickMultiImage(imageQuality: 90);
     if (files.isEmpty) return;
     setState(() => _sendingMedia = true);
-    final service = ref.read(simplexServiceProvider);
+    final service = ref.read(tanglexServiceProvider);
     final payload = <ImagePayload>[];
     for (final f in files) {
       final bytes = await f.readAsBytes();
@@ -151,7 +151,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     } catch (_) {}
     await controller.dispose();
     final previewBytes = thumb == null ? _prepareCirclePreview(bytes) : thumb;
-    final service = ref.read(simplexServiceProvider);
+    final service = ref.read(tanglexServiceProvider);
     final resultSend = await service.sendVideo(
       chatRef: widget.chatRef,
       filePath: file.path,
@@ -185,7 +185,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final path = res.files.single.path;
     if (path == null) return;
     setState(() => _sendingMedia = true);
-    final service = ref.read(simplexServiceProvider);
+    final service = ref.read(tanglexServiceProvider);
     final resultSend = await service.sendFile(
       chatRef: widget.chatRef,
       filePath: path,
@@ -227,7 +227,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       final bytes = File(sticker.filePath).readAsBytesSync();
       preview = _compressPreview(_prepareStickerPreview(bytes), maxBytes: 35000);
     }
-    final service = ref.read(simplexServiceProvider);
+    final service = ref.read(tanglexServiceProvider);
     final result = await service.sendSticker(
       chatRef: widget.chatRef,
       filePath: sticker.filePath,
@@ -442,7 +442,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     );
     if (result == null) return;
     setState(() => _sendingMedia = true);
-    final service = ref.read(simplexServiceProvider);
+    final service = ref.read(tanglexServiceProvider);
     final resultSend = await service.sendVideo(
       chatRef: widget.chatRef,
       filePath: result.filePath,
@@ -563,7 +563,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
   Future<void> _autoReceiveImages(List<_UiMessage> parsed) async {
     if (!_autoDownloadEnabled || !_enableFileReceive) return;
-    final service = ref.read(simplexServiceProvider);
+    final service = ref.read(tanglexServiceProvider);
     bool anyAccepted = false;
     for (final m in parsed) {
       for (final img in m.images) {
@@ -604,7 +604,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       );
       return;
     }
-    final service = ref.read(simplexServiceProvider);
+    final service = ref.read(tanglexServiceProvider);
     await Future<void>.delayed(const Duration(milliseconds: 300));
     await service.receiveFile(
       image.fileId!,
@@ -2408,7 +2408,7 @@ class _UiImage {
   bool get hasFullImage => filePath != null;
 }
 
-const int _maxAutoReceiveImageSize = 522240; // 255KB * 2 (SimpleX iOS)
+const int _maxAutoReceiveImageSize = 522240; // 255KB * 2 (TangleX iOS)
 
 Uint8List _prepareCirclePreview(Uint8List input) {
   try {

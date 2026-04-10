@@ -2,10 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../localization/app_localizations.dart';
-import '../service/simplex_service.dart';
+import '../service/tanglex_service.dart';
 
 class CreateProfileScreen extends ConsumerStatefulWidget {
-  final SimplexService service;
+  final TanglexService service;
 
   const CreateProfileScreen({super.key, required this.service});
 

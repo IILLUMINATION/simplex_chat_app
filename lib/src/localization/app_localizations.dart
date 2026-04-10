@@ -21,7 +21,7 @@ class AppLocalizations {
 
   // ========== Russian ==========
   static const Map<String, String> _ru = {
-    'app_title': 'SimpleX Chat',
+    'app_title': 'TangleX Chat',
     'init_core': 'Инициализировать ядро',
     'send': 'Отправить',
     'command_hint': '/_get app settings',
@@ -64,7 +64,7 @@ class AppLocalizations {
 
   // ========== English ==========
   static const Map<String, String> _en = {
-    'app_title': 'SimpleX Chat',
+    'app_title': 'TangleX Chat',
     'init_core': 'Init Core',
     'send': 'Send',
     'command_hint': '/_get app settings',

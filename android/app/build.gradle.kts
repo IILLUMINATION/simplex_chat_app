@@ -6,7 +6,7 @@ plugins {
 }
 
 android {
-    namespace = "com.example.simplex_chat_app"
+    namespace = "com.tanglex.chat"
     compileSdk = flutter.compileSdkVersion
     
     // 👇 ИЗМЕНИТЬ ЭТУ СТРОКУ:
@@ -23,7 +23,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.example.simplex_chat_app"
+        applicationId = "com.tanglex.chat"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode

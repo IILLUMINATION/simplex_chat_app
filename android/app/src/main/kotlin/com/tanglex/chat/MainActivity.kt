@@ -1,4 +1,4 @@
-package com.example.simplex_chat_app
+package com.tanglex.chat
 
 import io.flutter.embedding.android.FlutterActivity
 

@@ -7,13 +7,13 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
-import '../ffi/simplex_native.dart';
+import '../ffi/tanglex_native.dart';
 import '../providers/persistent_store.dart';
 
-class SimplexService {
-  SimplexService({SimplexNative? native}) : _native = native ?? SimplexNative();
+class TanglexService {
+  TanglexService({TanglexNative? native}) : _native = native ?? TanglexNative();
 
-  final SimplexNative _native;
+  final TanglexNative _native;
 
   final ValueNotifier<List<String>> logs = ValueNotifier<List<String>>(<String>[]);
 
@@ -38,10 +38,10 @@ class SimplexService {
     }
 
     try {
-      _appendLog('Starting SimpleX core initialization...');
+      _appendLog('Starting TangleX core initialization...');
 
       final docsDir = await getApplicationDocumentsDirectory();
-      final basePath = '${docsDir.path}/simplex_data';
+      final basePath = '${docsDir.path}/tanglex_data';
       String pathToUse = basePath;
       Directory(pathToUse).createSync(recursive: true);
       _appendLog('Data directory: $pathToUse');
@@ -61,7 +61,7 @@ class SimplexService {
         // Hot-restart can leave the previous native core holding the DB lock.
         // Fallback to a temporary directory so dev session can continue.
         final hotPath =
-            '${docsDir.path}/simplex_data_hot_${DateTime.now().millisecondsSinceEpoch}';
+            '${docsDir.path}/tanglex_data_hot_${DateTime.now().millisecondsSinceEpoch}';
         _appendLog(
             'DB still locked. Falling back to temporary data dir: $hotPath');
         Directory(hotPath).createSync(recursive: true);
