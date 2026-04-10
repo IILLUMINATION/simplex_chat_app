@@ -86,12 +86,18 @@ class _CircleRecorderScreenState extends State<CircleRecorderScreen> {
       _stopTimer();
       setState(() => _recording = false);
       final duration = _elapsedSec;
-      final thumb = await vthumb.VideoThumbnail.thumbnailData(
-        video: file.path,
-        imageFormat: vthumb.ImageFormat.JPEG,
-        maxWidth: 480,
-        quality: 75,
-      );
+      final thumb = await (() async {
+        try {
+          return await vthumb.VideoThumbnail.thumbnailData(
+            video: file.path,
+            imageFormat: vthumb.ImageFormat.JPEG,
+            maxWidth: 480,
+            quality: 75,
+          );
+        } catch (_) {
+          return null;
+        }
+      })();
       if (!mounted) return;
       if (thumb == null) {
         ScaffoldMessenger.of(context).showSnackBar(

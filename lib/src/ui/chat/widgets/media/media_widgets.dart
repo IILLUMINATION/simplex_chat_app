@@ -472,66 +472,157 @@ class StickerView extends StatelessWidget {
   }
 }
 
-class StickerThumb extends StatelessWidget {
+final Map<String, Uint8List> _thumbCache = {};
+final Set<String> _thumbInProgress = {};
+
+Future<Uint8List?> _generateThumb(String path, int maxWidth, int quality) async {
+  try {
+    final data = await vthumb.VideoThumbnail.thumbnailData(
+      video: path,
+      imageFormat: vthumb.ImageFormat.JPEG,
+      maxWidth: maxWidth,
+      quality: quality,
+    );
+    if (data != null) _thumbCache[path] = data;
+    return data;
+  } catch (_) {
+    return null;
+  }
+}
+
+/// Глобальный кэш превьюшек: filePath → bytes.
+/// Используется также в viewer_widgets.dart.
+Map<String, Uint8List> get thumbCache => _thumbCache;
+Set<String> get thumbInProgress => _thumbInProgress;
+
+/// Сгенерировать превью с обработкой ошибок и кэшированием.
+Future<Uint8List?> generateVideoThumb(
+    String path, int maxWidth, int quality) {
+  if (_thumbCache.containsKey(path)) return Future.value(_thumbCache[path]);
+  if (_thumbInProgress.contains(path)) return Future.value(null);
+  _thumbInProgress.add(path);
+  return _generateThumb(path, maxWidth, quality).whenComplete(() {
+    _thumbInProgress.remove(path);
+  });
+}
+
+class StickerThumb extends StatefulWidget {
   final String filePath;
 
   const StickerThumb({required this.filePath});
 
   @override
+  State<StickerThumb> createState() => _StickerThumbState();
+}
+
+class _StickerThumbState extends State<StickerThumb> {
+  Future<Uint8List?>? _future;
+
+  @override
+  void initState() {
+    super.initState();
+    _initFuture();
+  }
+
+  @override
+  void didUpdateWidget(StickerThumb oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.filePath != widget.filePath) _initFuture();
+  }
+
+  void _initFuture() {
+    final path = widget.filePath;
+    if (_thumbCache.containsKey(path)) return;
+    if (_thumbInProgress.contains(path)) return;
+    _thumbInProgress.add(path);
+    _future = _generateThumb(path, 200, 60).whenComplete(() {
+      _thumbInProgress.remove(path);
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
-    if (filePath.toLowerCase().endsWith('.webm')) {
-      return FutureBuilder<Uint8List?>(
-        future: vthumb.VideoThumbnail.thumbnailData(
-          video: filePath,
-          imageFormat: vthumb.ImageFormat.JPEG,
-          maxWidth: 200,
-          quality: 60,
-        ),
-        builder: (context, snap) {
-          final data = snap.data;
-          if (data == null) {
-            return const ColoredBox(color: Colors.black12);
-          }
+    final cached = _thumbCache[widget.filePath];
+    if (cached != null) {
+      return Image.memory(
+        cached,
+        fit: BoxFit.contain,
+        errorBuilder: (_, __, ___) => const ColoredBox(color: Colors.black12),
+      );
+    }
+    return FutureBuilder<Uint8List?>(
+      future: _future,
+      builder: (context, snap) {
+        final data = snap.data;
+        if (data != null) {
           return Image.memory(
             data,
             fit: BoxFit.contain,
             errorBuilder: (_, __, ___) => const ColoredBox(color: Colors.black12),
           );
-        },
-      );
-    }
-    return Image.file(
-      File(filePath),
-      fit: BoxFit.contain,
-      errorBuilder: (_, __, ___) => const ColoredBox(color: Colors.black12),
+        }
+        return const ColoredBox(color: Colors.black12);
+      },
     );
   }
 }
 
-class StickerWebm extends StatelessWidget {
+class StickerWebm extends StatefulWidget {
   final String filePath;
 
   const StickerWebm({required this.filePath});
 
   @override
+  State<StickerWebm> createState() => _StickerWebmState();
+}
+
+class _StickerWebmState extends State<StickerWebm> {
+  Future<Uint8List?>? _future;
+
+  @override
+  void initState() {
+    super.initState();
+    _initFuture();
+  }
+
+  @override
+  void didUpdateWidget(StickerWebm oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.filePath != widget.filePath) _initFuture();
+  }
+
+  void _initFuture() {
+    final path = widget.filePath;
+    if (_thumbCache.containsKey(path)) return;
+    if (_thumbInProgress.contains(path)) return;
+    _thumbInProgress.add(path);
+    _future = _generateThumb(path, 280, 75).whenComplete(() {
+      _thumbInProgress.remove(path);
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final cached = _thumbCache[widget.filePath];
+    if (cached != null) {
+      return Image.memory(
+        cached,
+        fit: BoxFit.contain,
+        errorBuilder: (_, __, ___) => const ColoredBox(color: Colors.black12),
+      );
+    }
     return FutureBuilder<Uint8List?>(
-      future: vthumb.VideoThumbnail.thumbnailData(
-        video: filePath,
-        imageFormat: vthumb.ImageFormat.JPEG,
-        maxWidth: 280,
-        quality: 75,
-      ),
+      future: _future,
       builder: (context, snap) {
         final data = snap.data;
-        if (data == null) {
-          return const ColoredBox(color: Colors.black12);
+        if (data != null) {
+          return Image.memory(
+            data,
+            fit: BoxFit.contain,
+            errorBuilder: (_, __, ___) => const ColoredBox(color: Colors.black12),
+          );
         }
-        return Image.memory(
-          data,
-          fit: BoxFit.contain,
-          errorBuilder: (_, __, ___) => const ColoredBox(color: Colors.black12),
-        );
+        return const ColoredBox(color: Colors.black12);
       },
     );
   }

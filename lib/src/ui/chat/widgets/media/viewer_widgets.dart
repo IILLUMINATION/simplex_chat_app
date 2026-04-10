@@ -10,6 +10,7 @@ import 'package:video_player/video_player.dart';
 import 'package:video_thumbnail/video_thumbnail.dart' as vthumb;
 
 import '../../models/chat_message_models.dart';
+import 'media_widgets.dart' show thumbCache, thumbInProgress, generateVideoThumb;
 
 class GalleryView extends StatefulWidget {
   final List<UiImage> images;
@@ -41,13 +42,17 @@ class _GalleryViewState extends State<GalleryView> {
   Widget _galleryImage(UiImage img) {
     final isWebm = (img.filePath ?? '').toLowerCase().endsWith('.webm');
     if (isWebm && img.filePath != null) {
+      final path = img.filePath!;
+      final cached = thumbCache[path];
+      if (cached != null) {
+        return Image.memory(
+          cached,
+          errorBuilder: (_, __, ___) => const ColoredBox(color: Colors.black12),
+        );
+      }
+      final future = generateVideoThumb(path, 600, 80);
       return FutureBuilder<Uint8List?>(
-        future: vthumb.VideoThumbnail.thumbnailData(
-          video: img.filePath!,
-          imageFormat: vthumb.ImageFormat.JPEG,
-          maxWidth: 600,
-          quality: 80,
-        ),
+        future: future,
         builder: (context, snap) {
           final data = snap.data;
           if (data == null) {
