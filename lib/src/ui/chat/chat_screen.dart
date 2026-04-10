@@ -124,6 +124,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           fileName: m.fileName,
           fileSize: m.fileSize,
           filePath: m.filePath,
+          quoted: m.quoted,
+          itemId: m.itemId,
         ));
         anyChanged = true;
       } else {
@@ -697,7 +699,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       isPinned: isPinned,
       audioPlayer: _audioPlayer,
       nowPlaying: _audioNowPlaying,
-      onTapDown: (d, ctx) => _showMessageOptions(ctx, d.globalPosition, m, isPinned),
+      onLongPress: (d, ctx) => _showMessageOptions(ctx, d.globalPosition, m, isPinned),
       onSwipeReply: () {
         if (m.itemId == null) {
           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Ответ недоступен')));
@@ -981,33 +983,67 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                   if (_replyTo != null)
                     Container(
                       margin: const EdgeInsets.only(bottom: 6),
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                       decoration: BoxDecoration(
-                        color: isDark ? const Color(0xFF262B32) : const Color(0xFFF1F5F9),
+                        color: isDark ? const Color(0xFF1E232A) : const Color(0xFFF7F9FC),
                         borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: isDark
+                              ? const Color(0xFF3A3F47)
+                              : const Color(0xFFE2E6EB),
+                          width: 1,
+                        ),
                       ),
                       child: Row(
                         children: [
                           Container(
-                            width: 3,
-                            height: 28,
-                            margin: const EdgeInsets.only(right: 8),
+                            width: 4,
+                            height: 40,
+                            margin: const EdgeInsets.only(left: 0, right: 10),
                             decoration: BoxDecoration(
-                              color: const Color(0xFF2AABEE),
-                              borderRadius: BorderRadius.circular(2),
+                              color: isDark
+                                  ? const Color(0xFF5A9CF5)
+                                  : const Color(0xFF6B8E5A),
+                              borderRadius: const BorderRadius.horizontal(
+                                left: Radius.circular(11),
+                              ),
                             ),
                           ),
                           Expanded(
-                            child: Text(
-                              _replyTo!.text.split('\n').first,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(color: textSecondary, fontSize: 12),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    _replyTo!.fromMe ? 'Вы' : widget.chatName,
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                      color: isDark
+                                          ? const Color(0xFF5A9CF5)
+                                          : const Color(0xFF6B8E5A),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    _replyTo!.text.split('\n').first,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      color: textPrimary,
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
                           IconButton(
                             onPressed: () => setState(() => _replyTo = null),
                             icon: Icon(Icons.close, size: 18, color: textSecondary),
+                            padding: const EdgeInsets.all(8),
+                            constraints: const BoxConstraints(),
                           ),
                         ],
                       ),

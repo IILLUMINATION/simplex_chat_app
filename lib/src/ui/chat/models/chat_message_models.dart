@@ -98,8 +98,9 @@ class AudioNowPlaying {
 
 class QuotedMessage {
   final String text;
+  final String senderName;
 
-  const QuotedMessage({required this.text});
+  const QuotedMessage({required this.text, this.senderName = ''});
 }
 
 class PreviewPayload {

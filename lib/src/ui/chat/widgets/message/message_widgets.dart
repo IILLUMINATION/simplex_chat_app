@@ -34,7 +34,7 @@ class MessageBubble extends StatelessWidget {
   final bool isPinned;
   final AudioPlayer audioPlayer;
   final AudioNowPlaying? nowPlaying;
-  final void Function(TapDownDetails, BuildContext)? onTapDown;
+  final void Function(LongPressStartDetails, BuildContext)? onLongPress;
   final VoidCallback? onSwipeReply;
 
   const MessageBubble({
@@ -46,7 +46,7 @@ class MessageBubble extends StatelessWidget {
     this.isPinned = false,
     required this.audioPlayer,
     required this.nowPlaying,
-    this.onTapDown,
+    this.onLongPress,
     this.onSwipeReply,
   });
 
@@ -60,7 +60,7 @@ class MessageBubble extends StatelessWidget {
     final isDark = theme.brightness == Brightness.dark;
 
     final incomingBubble = isDark ? const Color(0xFF2B2F36) : const Color(0xFFFFFFFF);
-    final outgoingBubble = isDark ? const Color(0xFF2A3F5F) : const Color(0xFFDDF1FF);
+    final outgoingBubble = isDark ? const Color(0xFF32373E) : const Color(0xFFEFF6DD);
     final textPrimary = isDark ? const Color(0xFFFFFFFF) : const Color(0xFF1D1F23);
     final textSecondary = isDark ? const Color(0xFF9AA0A6) : const Color(0xFF6B6F76);
 
@@ -84,8 +84,8 @@ class MessageBubble extends StatelessWidget {
     return Align(
       alignment: fromMe ? Alignment.centerRight : Alignment.centerLeft,
       child: GestureDetector(
-        behavior: HitTestBehavior.translucent,
-        onTapDown: onTapDown == null ? null : (d) => onTapDown!(d, context),
+        behavior: HitTestBehavior.deferToChild,
+        onLongPressStart: onLongPress == null ? null : (d) => onLongPress!(d, context),
         onHorizontalDragEnd: onSwipeReply == null
             ? null
             : (d) {
@@ -165,30 +165,60 @@ class MessageBubble extends StatelessWidget {
               if (message.quoted != null) ...[
                 Container(
                   margin: const EdgeInsets.only(bottom: 6),
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                  padding: const EdgeInsets.fromLTRB(10, 7, 10, 7),
                   decoration: BoxDecoration(
-                    color: fromMe
-                        ? const Color(0xFFAEDBFF)
-                        : (isDark ? const Color(0xFF2A2F36) : const Color(0xFFF1F5F9)),
-                    borderRadius: BorderRadius.circular(10),
+                    color: isDark
+                        ? const Color(0xFF1E2228)
+                        : const Color(0xFFF5F5F5),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: isDark
+                          ? const Color(0xFF3A3F47)
+                          : const Color(0xFFE0E0E0),
+                      width: 1,
+                    ),
                   ),
                   child: Row(
                     children: [
                       Container(
-                        width: 2,
-                        height: 24,
-                        margin: const EdgeInsets.only(right: 6),
+                        width: 3,
+                        height: 28,
+                        margin: const EdgeInsets.only(right: 8),
                         decoration: BoxDecoration(
-                          color: fromMe ? const Color(0xFF2AABEE) : const Color(0xFF7A8694),
+                          color: isDark
+                              ? const Color(0xFF5A9CF5)
+                              : const Color(0xFF6B8E5A),
                           borderRadius: BorderRadius.circular(2),
                         ),
                       ),
                       Expanded(
-                        child: Text(
-                          message.quoted!.text,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(fontSize: 12, color: textSecondary),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              message.quoted!.senderName.isNotEmpty
+                                  ? message.quoted!.senderName
+                                  : (fromMe ? 'Вы' : ''),
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: isDark
+                                    ? const Color(0xFF5A9CF5)
+                                    : const Color(0xFF6B8E5A),
+                              ),
+                            ),
+                            const SizedBox(height: 1),
+                            Text(
+                              message.quoted!.text,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: textPrimary,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ],
@@ -591,37 +621,38 @@ class FileAttachment extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final iconColor = fromMe
-        ? (isDark ? const Color(0xFFFFFFFF) : theme.colorScheme.onPrimaryContainer)
-        : (isDark ? const Color(0xFFFFFFFF) : theme.colorScheme.onSurface);
-    final fileIconColor = isDark ? const Color(0xFF0A84FF) : theme.colorScheme.primary;
+    final textColor = isDark ? const Color(0xFFFFFFFF) : const Color(0xFF1D1F23);
+    final sizeColor = isDark ? const Color(0xFF9AA0A6) : const Color(0xFF6B6F76);
+    final iconBgColor = isDark ? const Color(0xFF3A3F47) : const Color(0xFFE8ECF1);
+    final fileIconColor = isDark ? const Color(0xFF8AB4F8) : const Color(0xFF4A7FE5);
+    final containerBg = isDark
+        ? const Color(0xFF1E2228)
+        : const Color(0xFFF5F7FA);
 
     return Container(
-      constraints: const BoxConstraints(maxWidth: 260),
-      padding: const EdgeInsets.all(10),
+      constraints: const BoxConstraints(maxWidth: 250),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
-        color: isDark
-            ? const Color(0xFF2C2C2E).withOpacity(0.6)
-            : theme.colorScheme.surfaceContainerHighest.withOpacity(0.5),
-        borderRadius: BorderRadius.circular(12),
+        color: containerBg,
+        borderRadius: BorderRadius.circular(10),
         border: Border.all(
           color: isDark
-              ? const Color(0xFF38383A).withOpacity(0.4)
-              : theme.colorScheme.outline.withOpacity(0.15),
+              ? const Color(0xFF3A3F47)
+              : const Color(0xFFE2E6EB),
+          width: 1,
         ),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           Container(
-            padding: const EdgeInsets.all(10),
+            width: 40,
+            height: 40,
             decoration: BoxDecoration(
-              color: isDark
-                  ? const Color(0xFF2C2C2E)
-                  : theme.colorScheme.primaryContainer,
-              borderRadius: BorderRadius.circular(10),
+              color: iconBgColor,
+              borderRadius: BorderRadius.circular(8),
             ),
-            child: Icon(_fileIcon(), size: 24, color: fileIconColor),
+            child: Icon(_fileIcon(), size: 20, color: fileIconColor),
           ),
           const SizedBox(width: 10),
           Expanded(
@@ -635,8 +666,9 @@ class FileAttachment extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     fontWeight: FontWeight.w500,
-                    fontSize: 14,
-                    color: iconColor,
+                    fontSize: 13,
+                    color: textColor,
+                    height: 1.2,
                   ),
                 ),
                 if (fileSize != null) ...[
@@ -644,8 +676,8 @@ class FileAttachment extends StatelessWidget {
                   Text(
                     _formatSize(fileSize!),
                     style: TextStyle(
-                      fontSize: 12,
-                      color: isDark ? const Color(0xFF8E8E93) : theme.colorScheme.outline,
+                      fontSize: 11,
+                      color: sizeColor,
                     ),
                   ),
                 ],
@@ -653,15 +685,17 @@ class FileAttachment extends StatelessWidget {
             ),
           ),
           if (filePath != null) ...[
-            const SizedBox(width: 6),
+            const SizedBox(width: 4),
             IconButton(
-              icon: const Icon(Icons.open_in_new, size: 20),
+              icon: Icon(Icons.open_in_new, size: 18, color: fileIconColor),
               onPressed: () async {
                 final uri = Uri.file(filePath!);
                 if (await canLaunchUrl(uri)) {
                   await launchUrl(uri);
                 }
               },
+              padding: const EdgeInsets.all(6),
+              constraints: const BoxConstraints(),
               splashRadius: 20,
             ),
           ],
