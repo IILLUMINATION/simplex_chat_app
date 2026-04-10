@@ -52,7 +52,13 @@ class MediaGrid extends StatelessWidget {
         final needsDownload = isIncoming &&
             !img.hasFullImage &&
             img.fileId != null &&
-            img.fileStatusType == 'rcvInvitation';
+            img.fileStatusType == 'rcvInvitation' &&
+            !awaitingSender;
+        final awaitingSender = isIncoming &&
+            !img.hasFullImage &&
+            img.fileId != null &&
+            img.fileStatusType == 'rcvInvitation' &&
+            img.fileSize == null;
         final isDownloading = isIncoming &&
             (img.fileStatusType == 'rcvTransfer' || img.fileStatusType == 'rcvAccepted');
         final isSending = fromMe && img.fileStatusType == 'sndTransfer';
@@ -62,7 +68,18 @@ class MediaGrid extends StatelessWidget {
             (img.transferTotal != null && img.transferTotal! > 0) &&
             img.transferProgress != null;
         final progress = showProgress ? (img.transferProgress! / img.transferTotal!) : null;
-        if (needsDownload) {
+        if (awaitingSender) {
+          child = Stack(
+            fit: StackFit.expand,
+            children: [
+              child,
+              Container(color: Colors.black38),
+              const Center(
+                child: Icon(Icons.hourglass_empty, color: Colors.white70, size: 22),
+              ),
+            ],
+          );
+        } else if (needsDownload) {
           child = Stack(
             fit: StackFit.expand,
             children: [

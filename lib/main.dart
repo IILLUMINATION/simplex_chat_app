@@ -39,6 +39,7 @@ final fabActionProvider = ChangeNotifierProvider<_FabActionNotifier>((ref) {
 });
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
   runApp(const ProviderScope(child: TangleXApp()));
 }
 

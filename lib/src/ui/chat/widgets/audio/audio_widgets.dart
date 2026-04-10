@@ -155,7 +155,12 @@ class AudioBubble extends StatelessWidget {
     final subtitleColor = textSecondary;
     final isCurrent = nowPlaying?.filePath == audio.filePath;
     final canPlay = audio.filePath != null;
-    final isMissing = !canPlay && audio.fileId != null && !fromMe;
+    final awaitingSender = !fromMe &&
+        !canPlay &&
+        audio.fileId != null &&
+        audio.fileStatusType == 'rcvInvitation' &&
+        audio.fileSize == null;
+    final isMissing = !canPlay && audio.fileId != null && !fromMe && !awaitingSender;
     final showProgress = (audio.fileStatusType == 'rcvTransfer' ||
             audio.fileStatusType == 'rcvAccepted' ||
             audio.fileStatusType == 'sndTransfer') &&
@@ -187,7 +192,9 @@ class AudioBubble extends StatelessWidget {
                 child: Stack(
                   alignment: Alignment.center,
                   children: [
-                    if (isMissing || showProgress)
+                    if (awaitingSender)
+                      const Icon(Icons.hourglass_empty, color: Color(0xFF5A9CF5), size: 18),
+                    if (!awaitingSender && (isMissing || showProgress))
                       SizedBox(
                         width: 26,
                         height: 26,

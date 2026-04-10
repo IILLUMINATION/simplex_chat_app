@@ -70,7 +70,10 @@ UiMessage? parseChatItem(Map<String, dynamic> msg, {String? filesBaseDir}) {
     final sndProgress = fileStatus?['sndProgress'] as int?;
     final sndTotal = fileStatus?['sndTotal'] as int?;
     final transferProgress = rcvProgress ?? sndProgress;
-    final transferTotal = rcvTotal ?? sndTotal;
+    final hasTransferStatus = fileStatusType == 'rcvTransfer' ||
+        fileStatusType == 'rcvAccepted' ||
+        fileStatusType == 'sndTransfer';
+    final transferTotal = rcvTotal ?? sndTotal ?? (hasTransferStatus ? fileSize : null);
     final fileName = fileObj?['fileName'] as String?;
     final isCircle = (fileName != null && fileName.startsWith('circle_'));
     final isSticker = fileName != null && fileName.startsWith('st__');

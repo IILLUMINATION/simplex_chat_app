@@ -19,6 +19,7 @@ import 'package:highlight/languages/bash.dart';
 import 'package:intl/intl.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:open_filex/open_filex.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../../data/pin_store.dart' show PinnedMessage;
 import '../../models/chat_message_models.dart';
@@ -85,17 +86,11 @@ class MessageBubble extends StatelessWidget {
 
     return Align(
       alignment: fromMe ? Alignment.centerRight : Alignment.centerLeft,
-      child: GestureDetector(
-        behavior: HitTestBehavior.deferToChild,
+      child: SwipeReplyWrapper(
+        enabled: onSwipeReply != null,
+        fromMe: fromMe,
+        onReply: onSwipeReply,
         onLongPressStart: onLongPress == null ? null : (d) => onLongPress!(d, context),
-        onHorizontalDragEnd: onSwipeReply == null
-            ? null
-            : (d) {
-                final v = d.primaryVelocity ?? 0;
-                if (v.abs() > 250) {
-                  onSwipeReply!();
-                }
-              },
         child: Container(
           margin: const EdgeInsets.symmetric(vertical: 2, horizontal: 6),
           padding: isVideoOnly || isStickerOnly
@@ -290,6 +285,115 @@ class MessageBubble extends StatelessWidget {
   }
 }
 
+class SwipeReplyWrapper extends StatefulWidget {
+  final Widget child;
+  final bool enabled;
+  final bool fromMe;
+  final VoidCallback? onReply;
+  final void Function(LongPressStartDetails)? onLongPressStart;
+
+  const SwipeReplyWrapper({
+    required this.child,
+    required this.enabled,
+    required this.fromMe,
+    required this.onReply,
+    this.onLongPressStart,
+  });
+
+  @override
+  State<SwipeReplyWrapper> createState() => _SwipeReplyWrapperState();
+}
+
+class _SwipeReplyWrapperState extends State<SwipeReplyWrapper> with SingleTickerProviderStateMixin {
+  static const double _maxOffset = 64;
+  static const double _triggerOffset = 48;
+  double _offset = 0;
+  bool _triggered = false;
+  late final AnimationController _controller;
+  late Animation<double> _anim;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(vsync: this, duration: const Duration(milliseconds: 180))
+      ..addListener(() {
+        setState(() {
+          _offset = _anim.value;
+        });
+      });
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _animateBack() {
+    _anim = Tween<double>(begin: _offset, end: 0).chain(CurveTween(curve: Curves.easeOut)).animate(_controller);
+    _controller.forward(from: 0);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final showReply = _offset.abs() > 8;
+    return GestureDetector(
+      behavior: HitTestBehavior.translucent,
+      onLongPressStart: widget.onLongPressStart,
+      onHorizontalDragUpdate: widget.enabled
+          ? (d) {
+              final delta = d.delta.dx;
+              if (delta <= 0 && _offset <= 0) return;
+              final next = (_offset + delta).clamp(0.0, _maxOffset);
+              if (next >= _triggerOffset && !_triggered) {
+                _triggered = true;
+                HapticFeedback.selectionClick();
+              }
+              setState(() {
+                _offset = next;
+              });
+            }
+          : null,
+      onHorizontalDragEnd: widget.enabled
+          ? (_) {
+              final shouldReply = _offset >= _triggerOffset;
+              _animateBack();
+              if (shouldReply) widget.onReply?.call();
+              _triggered = false;
+            }
+          : null,
+      onHorizontalDragCancel: widget.enabled
+          ? () {
+              _animateBack();
+              _triggered = false;
+            }
+          : null,
+      child: Stack(
+        alignment: Alignment.centerLeft,
+        children: [
+          if (showReply)
+            Positioned(
+              left: 6,
+              child: Container(
+                width: 26,
+                height: 26,
+                decoration: const BoxDecoration(
+                  color: Color(0xFF2A2A2A),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.reply, size: 14, color: Color(0xFF8AB4F8)),
+              ),
+            ),
+          Transform.translate(
+            offset: Offset(_offset, 0),
+            child: widget.child,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class MarkdownTextWidget extends StatelessWidget {
   final String text;
   final Color textColor;
@@ -301,6 +405,11 @@ class MarkdownTextWidget extends StatelessWidget {
     final theme = Theme.of(context);
     final codeBg =
         theme.brightness == Brightness.dark ? const Color(0xFF1E1E1E) : const Color(0xFFF5F5F5);
+    final baseStyle = theme.textTheme.bodyMedium?.copyWith(
+      color: textColor,
+      height: 1.35,
+      fontSize: 14.5,
+    );
 
     final langs = {
       'dart': dart,
@@ -327,29 +436,51 @@ class MarkdownTextWidget extends StatelessWidget {
     }
 
     return MarkdownBody(
-        data: text,
-        styleSheet: MarkdownStyleSheet(
-          p: TextStyle(color: textColor, height: 1.25),
-          code: TextStyle(
-            backgroundColor: codeBg,
-            color: theme.colorScheme.onSurface,
-            fontFamily: 'monospace',
-            fontSize: theme.textTheme.bodyMedium?.fontSize,
-          ),
-          blockquote: TextStyle(
-            color: textColor.withOpacity(0.7),
-            fontStyle: FontStyle.italic,
-          ),
-          blockquoteDecoration: BoxDecoration(
-            border: Border(
-              left: BorderSide(color: theme.colorScheme.outline, width: 3),
-            ),
-          ),
+      data: text,
+      selectable: true,
+      softLineBreak: true,
+      onTapLink: (text, href, title) async {
+        if (href == null) return;
+        final uri = Uri.tryParse(href);
+        if (uri == null) return;
+        if (await canLaunchUrl(uri)) {
+          await launchUrl(uri, mode: LaunchMode.externalApplication);
+        }
+      },
+      styleSheet: MarkdownStyleSheet(
+        p: baseStyle,
+        h1: baseStyle?.copyWith(fontSize: 22, fontWeight: FontWeight.w700),
+        h2: baseStyle?.copyWith(fontSize: 19, fontWeight: FontWeight.w700),
+        h3: baseStyle?.copyWith(fontSize: 17, fontWeight: FontWeight.w700),
+        strong: baseStyle?.copyWith(fontWeight: FontWeight.w700),
+        em: baseStyle?.copyWith(fontStyle: FontStyle.italic),
+        code: TextStyle(
+          backgroundColor: codeBg,
+          color: theme.colorScheme.onSurface,
+          fontFamily: 'monospace',
+          fontSize: theme.textTheme.bodyMedium?.fontSize,
         ),
-        builders: {
-          'code': CodeBlockBuilder(codeBg, textColor, Theme.of(context)),
-        },
-      );
+        codeblockPadding: const EdgeInsets.all(12),
+        codeblockDecoration: BoxDecoration(
+          color: codeBg,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: const Color(0xFF2A2A2A)),
+        ),
+        blockquote: baseStyle?.copyWith(color: textColor.withOpacity(0.75)),
+        blockquoteDecoration: BoxDecoration(
+          color: const Color(0xFF1A1A1A),
+          border: Border(left: BorderSide(color: theme.colorScheme.outline, width: 3)),
+        ),
+        listBullet: baseStyle,
+        horizontalRuleDecoration: BoxDecoration(
+          border: Border(top: BorderSide(color: theme.colorScheme.outline)),
+        ),
+        a: baseStyle?.copyWith(color: const Color(0xFF8AB4F8)),
+      ),
+      builders: {
+        'code': CodeBlockBuilder(codeBg, textColor, Theme.of(context)),
+      },
+    );
   }
 }
 
@@ -626,8 +757,15 @@ class FileAttachment extends StatelessWidget {
 
     final isIncoming = !fromMe;
     final hasLocal = filePath != null && filePath!.isNotEmpty;
-    final needsDownload =
-        isIncoming && !hasLocal && fileId != null && fileStatusType == 'rcvInvitation';
+    final awaitingSender = isIncoming &&
+        !hasLocal &&
+        fileStatusType == 'rcvInvitation' &&
+        fileSize == null;
+    final needsDownload = isIncoming &&
+        !hasLocal &&
+        fileId != null &&
+        fileStatusType == 'rcvInvitation' &&
+        !awaitingSender;
     final isDownloading =
         isIncoming && !hasLocal && (fileStatusType == 'rcvTransfer' || fileStatusType == 'rcvAccepted');
     final showProgress = (fileStatusType == 'rcvTransfer' ||
@@ -640,11 +778,28 @@ class FileAttachment extends StatelessWidget {
 
     Future<void> openFile() async {
       if (!hasLocal) return;
-      final result = await OpenFilex.open(filePath!);
-      if (result.type != ResultType.done && context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Не удалось открыть файл: ${result.message ?? result.type}')),
-        );
+      try {
+        final result = await OpenFilex.open(filePath!);
+        if (result.type != ResultType.done && context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Не удалось открыть файл: ${result.message ?? result.type}')),
+          );
+        }
+      } on MissingPluginException {
+        final uri = Uri.file(filePath!);
+        if (await canLaunchUrl(uri)) {
+          await launchUrl(uri, mode: LaunchMode.externalApplication);
+        } else if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Нет приложения для открытия файла')),
+          );
+        }
+      } catch (e) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Не удалось открыть файл: $e')),
+          );
+        }
       }
     }
 
@@ -691,7 +846,16 @@ class FileAttachment extends StatelessWidget {
                       height: 1.2,
                     ),
                   ),
-                  if (fileSize != null) ...[
+                  if (awaitingSender) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      'Ожидает отправителя',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: sizeColor,
+                      ),
+                    ),
+                  ] else if (fileSize != null) ...[
                     const SizedBox(height: 2),
                     Text(
                       _formatSize(fileSize!),
@@ -705,7 +869,9 @@ class FileAttachment extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 4),
-            if (needsDownload)
+            if (awaitingSender)
+              const Icon(Icons.hourglass_empty, size: 18, color: Color(0xFF8AB4F8))
+            else if (needsDownload)
               IconButton(
                 icon: Icon(Icons.download, size: 20, color: fileIconColor),
                 onPressed: onDownload,

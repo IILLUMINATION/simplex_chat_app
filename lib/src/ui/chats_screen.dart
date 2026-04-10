@@ -416,6 +416,8 @@ class _ChatsScreenState extends ConsumerState<ChatsScreen> {
         builder: (_) => ChatScreen(
           chatRef: chat.chatRef,
           chatName: chat.displayName,
+          avatarImage: chat.avatarImage,
+          chatType: chat.chatType,
         ),
       ),
     );

@@ -20,14 +20,93 @@ import 'chat_widgets.dart';
 import 'package:just_audio/just_audio.dart';
 import 'audio_player_holder.dart';
 
+class _ChatHeader extends StatelessWidget {
+  final String title;
+  final String chatType;
+  final Uint8List? avatarImage;
+  final Color textPrimary;
+  final Color textSecondary;
+
+  const _ChatHeader({
+    required this.title,
+    required this.chatType,
+    required this.avatarImage,
+    required this.textPrimary,
+    required this.textSecondary,
+  });
+
+  String _subtitle() {
+    if (chatType == 'group') return 'Группа';
+    if (chatType == 'contact') return 'Контакт';
+    return 'Чат';
+  }
+
+  String _initials() {
+    final parts = title.trim().split(RegExp(r'\s+'));
+    if (parts.isEmpty) return '';
+    if (parts.length == 1) {
+      final runes = parts.first.runes.toList();
+      final take = runes.take(2).toList();
+      return String.fromCharCodes(take).toUpperCase();
+    }
+    final a = parts[0].runes.isEmpty ? '' : String.fromCharCodes([parts[0].runes.first]);
+    final b = parts[1].runes.isEmpty ? '' : String.fromCharCodes([parts[1].runes.first]);
+    return (a + b).toUpperCase();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        const SizedBox(width: 4),
+        CircleAvatar(
+          radius: 18,
+          backgroundColor: const Color(0xFF2A2A2A),
+          backgroundImage: avatarImage != null ? MemoryImage(avatarImage!) : null,
+          child: avatarImage == null
+              ? Text(
+                  _initials(),
+                  style: TextStyle(color: textPrimary, fontWeight: FontWeight.w600, fontSize: 12),
+                )
+              : null,
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(
+                title,
+                style: TextStyle(color: textPrimary, fontSize: 16, fontWeight: FontWeight.w600, letterSpacing: -0.2),
+                overflow: TextOverflow.ellipsis,
+              ),
+              const SizedBox(height: 2),
+              Text(
+                _subtitle(),
+                style: TextStyle(color: textSecondary, fontSize: 12),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class ChatScreen extends ConsumerStatefulWidget {
   final String chatRef;
   final String chatName;
+  final Uint8List? avatarImage;
+  final String chatType;
 
   const ChatScreen({
     super.key,
     required this.chatRef,
     required this.chatName,
+    this.avatarImage,
+    required this.chatType,
   });
 
   @override
@@ -41,8 +120,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   bool _sending = false;
   bool _sendingMedia = false;
   final Set<int> _autoRequestedFiles = <int>{};
-  bool _autoDownloadEnabled = false;
-  bool _enableFileReceive = false;
   String? _filesDir;
   StreamSubscription<Map<String, dynamic>>? _eventSub;
   Timer? _refreshDebounce;
@@ -868,7 +945,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   }
 
   Future<void> _autoReceiveImages(List<UiMessage> parsed) async {
-    if (!_autoDownloadEnabled || !_enableFileReceive) return;
     if (_filesDir == null) return;
     final service = ref.read(tanglexServiceProvider);
     bool anyAccepted = false;
@@ -899,16 +975,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final loc = AppLocalizations.of(context);
     if (image.fileId == null) return;
     if (image.fileStatusType != 'rcvInvitation') return;
-    if (!_enableFileReceive) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(loc.translate('hd_download_tooltip')),
-          backgroundColor: Theme.of(context).colorScheme.tertiaryContainer,
-        ),
-      );
-      return;
-    }
     final service = ref.read(tanglexServiceProvider);
     try {
       await Future<void>.delayed(const Duration(milliseconds: 300));
@@ -958,34 +1024,14 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         backgroundColor: headerBg,
         elevation: 0,
         leading: IconButton(icon: Icon(Icons.arrow_back, color: textPrimary), onPressed: () => Navigator.of(context).pop()),
-        title: Text(
-          widget.chatName,
-          style: TextStyle(color: textPrimary, fontSize: 17, fontWeight: FontWeight.w600, letterSpacing: -0.4),
-          overflow: TextOverflow.ellipsis,
+        titleSpacing: 0,
+        title: _ChatHeader(
+          title: widget.chatName,
+          chatType: widget.chatType,
+          avatarImage: widget.avatarImage,
+          textPrimary: textPrimary,
+          textSecondary: textSecondary,
         ),
-        actions: [
-          IconButton(
-            tooltip: loc.translate('hd_download'),
-            icon: Icon(_enableFileReceive ? Icons.cloud_download : Icons.cloud_off, color: textSecondary),
-            onPressed: () async {
-              final enabled = await showModalBottomSheet<bool>(
-                context: context,
-                builder: (ctx) {
-                  return SafeArea(
-                    child: ListTile(
-                      leading: Icon(_enableFileReceive ? Icons.cloud_download : Icons.cloud_off),
-                      title: Text(loc.translate('hd_download_tooltip')),
-                      subtitle: Text(loc.translate('hd_download_warning')),
-                      onTap: () => Navigator.of(ctx).pop(!_enableFileReceive),
-                    ),
-                  );
-                },
-              );
-              if (enabled == null) return;
-              setState(() => _enableFileReceive = enabled);
-            },
-          ),
-        ],
       ),
       body: SelectionArea(
         child: Column(
