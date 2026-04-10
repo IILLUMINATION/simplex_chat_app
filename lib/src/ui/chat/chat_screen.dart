@@ -1237,8 +1237,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
                       IconButton(
-                        onPressed: _sendingMedia ? null : _openStickerPicker,
-                        icon: Icon(Icons.emoji_emotions_outlined, color: textSecondary),
+                        onPressed: _sendingMedia ? null : _openAttachMenu,
+                        icon: Icon(Icons.attach_file, color: textSecondary),
                       ),
                       Expanded(
                         child: ConstrainedBox(
@@ -1249,8 +1249,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                             decoration: InputDecoration(
                               hintText: loc.translate('message_hint'),
                               hintStyle: const TextStyle(color: Color(0xFF606060)),
-                              filled: true,
-                              fillColor: const Color(0xFF222222),
+                              filled: false,
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(18),
                                 borderSide: BorderSide.none,
@@ -1264,14 +1263,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                           ),
                         ),
                       ),
-                      IconButton(
-                        onPressed: _sendingMedia ? null : _sendImages,
-                        icon: Icon(Icons.photo_camera_outlined, color: textSecondary),
-                      ),
-                      IconButton(
-                        onPressed: _sendingMedia ? null : _openAttachMenu,
-                        icon: Icon(Icons.attach_file, color: textSecondary),
-                      ),
                       ValueListenableBuilder(
                         valueListenable: _msgController,
                         builder: (context, value, child) {
@@ -1283,6 +1274,19 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                                   ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
                                   : Icon(Icons.send, color: theme.colorScheme.primary),
                             );
+                          }
+                          return IconButton(
+                            onPressed: _sendingMedia ? null : _openStickerPicker,
+                            icon: Icon(Icons.emoji_emotions_outlined, color: textSecondary),
+                          );
+                        },
+                      ),
+                      ValueListenableBuilder(
+                        valueListenable: _msgController,
+                        builder: (context, value, child) {
+                          final hasText = value.text.trim().isNotEmpty;
+                          if (hasText) {
+                            return const SizedBox.shrink();
                           }
                           return GestureDetector(
                             onTap: () => setState(() => _circleMode = !_circleMode),
