@@ -59,10 +59,10 @@ class MessageBubble extends StatelessWidget {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
 
-    final incomingBubble = isDark ? const Color(0xFF2B2F36) : const Color(0xFFFFFFFF);
-    final outgoingBubble = isDark ? const Color(0xFF32373E) : const Color(0xFFEFF6DD);
-    final textPrimary = isDark ? const Color(0xFFFFFFFF) : const Color(0xFF1D1F23);
-    final textSecondary = isDark ? const Color(0xFF9AA0A6) : const Color(0xFF6B6F76);
+    final incomingBubble = const Color(0xFF191919);
+    final outgoingBubble = const Color(0xFF191919);
+    final textPrimary = const Color(0xFFE8E8E8);
+    final textSecondary = const Color(0xFF808080);
 
     final isVideoOnly = message.images.length == 1 &&
         message.images.first.isVideo &&
@@ -118,7 +118,7 @@ class MessageBubble extends StatelessWidget {
                 ? null
                 : [
                     BoxShadow(
-                      color: Colors.black.withOpacity(isDark ? 0.18 : 0.06),
+                      color: Colors.black.withOpacity(0.25),
                       blurRadius: 8,
                       offset: const Offset(0, 2),
                     ),
@@ -167,14 +167,10 @@ class MessageBubble extends StatelessWidget {
                   margin: const EdgeInsets.only(bottom: 6),
                   padding: const EdgeInsets.fromLTRB(10, 7, 10, 7),
                   decoration: BoxDecoration(
-                    color: isDark
-                        ? const Color(0xFF1E2228)
-                        : const Color(0xFFF5F5F5),
+                    color: const Color(0xFF303030),
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(
-                      color: isDark
-                          ? const Color(0xFF3A3F47)
-                          : const Color(0xFFE0E0E0),
+                      color: const Color(0xFF3A3A3A),
                       width: 1,
                     ),
                   ),
@@ -185,9 +181,7 @@ class MessageBubble extends StatelessWidget {
                         height: 28,
                         margin: const EdgeInsets.only(right: 8),
                         decoration: BoxDecoration(
-                          color: isDark
-                              ? const Color(0xFF5A9CF5)
-                              : const Color(0xFF6B8E5A),
+                          color: const Color(0xFF5A9CF5),
                           borderRadius: BorderRadius.circular(2),
                         ),
                       ),
@@ -203,9 +197,7 @@ class MessageBubble extends StatelessWidget {
                               style: TextStyle(
                                 fontSize: 12,
                                 fontWeight: FontWeight.w600,
-                                color: isDark
-                                    ? const Color(0xFF5A9CF5)
-                                    : const Color(0xFF6B8E5A),
+                                color: const Color(0xFF5A9CF5),
                               ),
                             ),
                             const SizedBox(height: 1),
@@ -327,8 +319,7 @@ class MarkdownTextWidget extends StatelessWidget {
       highlight.highlight.registerLanguage(entry.key, entry.value);
     }
 
-    return SelectionArea(
-      child: MarkdownBody(
+    return MarkdownBody(
         data: text,
         styleSheet: MarkdownStyleSheet(
           p: TextStyle(color: textColor, height: 1.25),
@@ -351,8 +342,7 @@ class MarkdownTextWidget extends StatelessWidget {
         builders: {
           'code': CodeBlockBuilder(codeBg, textColor, Theme.of(context)),
         },
-      ),
-    );
+      );
   }
 }
 
@@ -509,24 +499,20 @@ class SystemBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
     return Center(
       child: Container(
         margin: const EdgeInsets.symmetric(vertical: 12, horizontal: 32),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
         decoration: BoxDecoration(
-          color: isDark
-              ? const Color(0xFF1C1C1E).withOpacity(0.8)
-              : theme.colorScheme.surfaceContainerHighest.withOpacity(0.6),
+          color: const Color(0xFF1C1C1C).withOpacity(0.8),
           borderRadius: BorderRadius.circular(14),
         ),
         child: Text(
           text,
           textAlign: TextAlign.center,
-          style: TextStyle(
+          style: const TextStyle(
             fontSize: 13,
-            color: isDark ? const Color(0xFF8E8E93) : theme.colorScheme.outline,
+            color: Color(0xFF808080),
             fontWeight: FontWeight.w400,
           ),
         ),
@@ -542,8 +528,6 @@ class DateDivider extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
     final dateDay = DateTime(date.year, date.month, date.day);
@@ -564,16 +548,14 @@ class DateDivider extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
           decoration: BoxDecoration(
-            color: isDark
-                ? const Color(0xFF1C1C1E).withOpacity(0.85)
-                : theme.colorScheme.surfaceContainerHighest.withOpacity(0.7),
+            color: const Color(0xFF1C1C1C).withOpacity(0.85),
             borderRadius: BorderRadius.circular(14),
           ),
           child: Text(
             label,
-            style: TextStyle(
+            style: const TextStyle(
               fontSize: 13,
-              color: isDark ? const Color(0xFFAEAEB2) : theme.colorScheme.onSurfaceVariant,
+              color: Color(0xFFB0B0B0),
               fontWeight: FontWeight.w500,
             ),
           ),
@@ -619,15 +601,11 @@ class FileAttachment extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final textColor = isDark ? const Color(0xFFFFFFFF) : const Color(0xFF1D1F23);
-    final sizeColor = isDark ? const Color(0xFF9AA0A6) : const Color(0xFF6B6F76);
-    final iconBgColor = isDark ? const Color(0xFF3A3F47) : const Color(0xFFE8ECF1);
-    final fileIconColor = isDark ? const Color(0xFF8AB4F8) : const Color(0xFF4A7FE5);
-    final containerBg = isDark
-        ? const Color(0xFF1E2228)
-        : const Color(0xFFF5F7FA);
+    final textColor = const Color(0xFFE8E8E8);
+    final sizeColor = const Color(0xFF808080);
+    final iconBgColor = const Color(0xFF2A2A2A);
+    final fileIconColor = const Color(0xFF8AB4F8);
+    final containerBg = const Color(0xFF222222);
 
     return Container(
       constraints: const BoxConstraints(maxWidth: 250),
@@ -636,9 +614,7 @@ class FileAttachment extends StatelessWidget {
         color: containerBg,
         borderRadius: BorderRadius.circular(10),
         border: Border.all(
-          color: isDark
-              ? const Color(0xFF3A3F47)
-              : const Color(0xFFE2E6EB),
+          color: const Color(0xFF333333),
           width: 1,
         ),
       ),
@@ -773,22 +749,18 @@ class _PinnedBarState extends State<PinnedBar> {
 
     final displayIndex = _selectDisplayIndex(pins);
     final pm = pins[displayIndex];
-    final textColor = isDark ? const Color(0xFF8E8E93) : theme.colorScheme.outline;
-    final lineColor = isDark ? const Color(0xFF4EA3F1) : const Color(0xFF2AABEE);
+    final textColor = const Color(0xFF808080);
+    final lineColor = const Color(0xFF5A9CF5);
 
     return GestureDetector(
       onTap: () => _advanceToNext(pins),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
-          color: isDark
-              ? const Color(0xFF1E232A)
-              : const Color(0xFFF2F6FA),
+          color: const Color(0xFF111111),
           border: Border(
             bottom: BorderSide(
-              color: isDark
-                  ? const Color(0xFF38383A).withOpacity(0.5)
-                  : theme.colorScheme.outline.withOpacity(0.15),
+              color: const Color(0xFF333333),
             ),
           ),
         ),
@@ -831,7 +803,7 @@ class _PinnedBarState extends State<PinnedBar> {
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       fontSize: 14,
-                      color: isDark ? const Color(0xFFAEAEB2) : theme.colorScheme.onSurfaceVariant,
+                      color: const Color(0xFFB0B0B0),
                     ),
                   ),
                 ],

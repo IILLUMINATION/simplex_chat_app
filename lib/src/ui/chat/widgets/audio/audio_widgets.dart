@@ -16,17 +16,13 @@ class AudioMiniPlayer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1D232A) : const Color(0xFFF0F6FF),
-        border: Border(
+        color: const Color(0xFF111111),
+        border: const Border(
           bottom: BorderSide(
-            color: isDark
-                ? const Color(0xFF38383A).withOpacity(0.5)
-                : theme.colorScheme.outline.withOpacity(0.15),
+            color: Color(0xFF333333),
           ),
         ),
       ),
@@ -38,7 +34,10 @@ class AudioMiniPlayer extends StatelessWidget {
               final playing = snap.data?.playing ?? false;
               return IconButton(
                 onPressed: () => playing ? player.pause() : player.play(),
-                icon: Icon(playing ? Icons.pause : Icons.play_arrow, color: isDark ? Colors.white : const Color(0xFF1A73E8)),
+                icon: Icon(
+                  playing ? Icons.pause : Icons.play_arrow,
+                  color: const Color(0xFF5A9CF5),
+                ),
               );
             },
           ),
@@ -51,8 +50,8 @@ class AudioMiniPlayer extends StatelessWidget {
                   title,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.labelLarge?.copyWith(
-                    color: isDark ? Colors.white : const Color(0xFF1D1F23),
+                  style: const TextStyle(
+                    color: Color(0xFFE8E8E8),
                     fontWeight: FontWeight.w600,
                   ),
                 ),
@@ -75,11 +74,9 @@ class AudioMiniPlayer extends StatelessWidget {
                                 trackHeight: 3,
                                 thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 5),
                                 overlayShape: const RoundSliderOverlayShape(overlayRadius: 10),
-                                activeTrackColor: isDark ? const Color(0xFF64B5FF) : const Color(0xFF1A73E8),
-                                inactiveTrackColor: isDark
-                                    ? Colors.white.withOpacity(0.15)
-                                    : const Color(0xFFBFDDFB),
-                                thumbColor: isDark ? const Color(0xFF64B5FF) : const Color(0xFF1A73E8),
+                                activeTrackColor: const Color(0xFF5A9CF5),
+                                inactiveTrackColor: const Color(0xFF333333),
+                                thumbColor: const Color(0xFF5A9CF5),
                               ),
                               child: Slider(
                                 value: value,
@@ -96,12 +93,12 @@ class AudioMiniPlayer extends StatelessWidget {
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
                                 Text(_fmt(pos),
-                                    style: theme.textTheme.labelSmall?.copyWith(
-                                      color: isDark ? Colors.white70 : const Color(0xFF5F6368),
+                                    style: const TextStyle(
+                                      color: Color(0xFF808080),
                                     )),
                                 Text(_fmt(dur),
-                                    style: theme.textTheme.labelSmall?.copyWith(
-                                      color: isDark ? Colors.white70 : const Color(0xFF5F6368),
+                                    style: const TextStyle(
+                                      color: Color(0xFF808080),
                                     )),
                               ],
                             ),
@@ -116,7 +113,7 @@ class AudioMiniPlayer extends StatelessWidget {
           ),
           IconButton(
             onPressed: onClose,
-            icon: Icon(Icons.close, color: isDark ? Colors.white70 : const Color(0xFF5F6368)),
+            icon: const Icon(Icons.close, color: Color(0xFF808080)),
           ),
         ],
       ),
@@ -154,15 +151,18 @@ class AudioBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
     final titleColor = textPrimary;
     final subtitleColor = textSecondary;
     final isCurrent = nowPlaying?.filePath == audio.filePath;
     final canPlay = audio.filePath != null;
     final isMissing = !canPlay && audio.fileId != null && !fromMe;
     final showProgress = (audio.fileStatusType == 'rcvTransfer' || audio.fileStatusType == 'sndTransfer') &&
-        (audio.transferTotal != null && audio.transferTotal! > 0);
+        (audio.transferTotal != null && audio.transferTotal! > 0) &&
+        audio.transferProgress != null;
     final progress = showProgress ? (audio.transferProgress! / audio.transferTotal!) : null;
+    final playBtnBg = fromMe
+        ? const Color(0xFF5A9CF5)
+        : const Color(0xFF2A2A2A);
 
     return StreamBuilder<PlayerState>(
       stream: audioPlayer.playerStateStream,
@@ -179,9 +179,7 @@ class AudioBubble extends StatelessWidget {
                 width: 34,
                 height: 34,
                 decoration: BoxDecoration(
-                  color: fromMe
-                      ? const Color(0xFF2AABEE)
-                      : (isDark ? const Color(0xFF2A2F36) : const Color(0xFFE2E8F0)),
+                  color: playBtnBg,
                   shape: BoxShape.circle,
                 ),
                 child: Stack(
@@ -194,11 +192,12 @@ class AudioBubble extends StatelessWidget {
                         child: CircularProgressIndicator(
                           strokeWidth: 2,
                           value: progress,
+                          color: const Color(0xFF5A9CF5),
                         ),
                       ),
                     Icon(
                       isMissing ? Icons.download : (showPause ? Icons.pause : Icons.play_arrow),
-                      color: fromMe ? Colors.white : (isDark ? Colors.white : const Color(0xFF2A7ABF)),
+                      color: fromMe ? Colors.white : const Color(0xFF5A9CF5),
                       size: 20,
                     ),
                   ],
@@ -224,7 +223,7 @@ class AudioBubble extends StatelessWidget {
                   Text(
                     _buildSubtitle(),
                     style: theme.textTheme.bodySmall?.copyWith(
-                      color: isCurrent && playing ? const Color(0xFF2AABEE) : subtitleColor,
+                      color: isCurrent && playing ? const Color(0xFF5A9CF5) : subtitleColor,
                       fontSize: 11,
                     ),
                   ),

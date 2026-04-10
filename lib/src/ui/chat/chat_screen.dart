@@ -74,23 +74,29 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   }
 
   Future<void> _loadMessages() async {
-    setState(() => _loading = true);
-    final service = ref.read(tanglexServiceProvider);
-    final msgs = await service.getChatMessages(widget.chatRef);
-    final parsed = <UiMessage>[];
-    for (final raw in msgs) {
-      final ui = parseChatItem(raw);
-      if (ui != null) parsed.add(ui);
-    }
-    parsed.sort((a, b) {
-      final at = a.time ?? DateTime.fromMillisecondsSinceEpoch(0);
-      final bt = b.time ?? DateTime.fromMillisecondsSinceEpoch(0);
-      return bt.compareTo(at);
-    });
-    setState(() {
-      _messages = parsed;
-      _loading = false;
-    });
+    try {
+      setState(() => _loading = true);
+      final service = ref.read(tanglexServiceProvider);
+      final msgs = await service.getChatMessages(widget.chatRef);
+      final parsed = <UiMessage>[];
+      for (final raw in msgs) {
+        try {
+          final ui = parseChatItem(raw);
+          if (ui != null) parsed.add(ui);
+        } catch (e) {
+          debugPrint('Error parsing message: $e');
+        }
+      }
+      parsed.sort((a, b) {
+        final at = a.time ?? DateTime.fromMillisecondsSinceEpoch(0);
+        final bt = b.time ?? DateTime.fromMillisecondsSinceEpoch(0);
+        return bt.compareTo(at);
+      });
+      if (!mounted) return;
+      setState(() {
+        _messages = parsed;
+        _loading = false;
+      });
 
     final pinPattern = RegExp(r'^/pin\s+');
     final shortPin = RegExp(r'^/p\s+');
@@ -137,6 +143,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     }
 
     await _autoReceiveImages(anyChanged ? cleaned : parsed);
+    } catch (e) {
+      debugPrint('Error loading messages: $e');
+      if (mounted) {
+        setState(() => _loading = false);
+      }
+    }
   }
 
   Future<void> _sendMessage() async {
@@ -546,8 +558,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final fileId = audio.fileId;
     if (fileId == null) return;
     final service = ref.read(tanglexServiceProvider);
-    final ok = await service.receiveFile(fileId, approvedRelays: true);
-    if (ok && mounted) await _loadMessages();
+    try {
+      final ok = await service.receiveFile(fileId, approvedRelays: true);
+      if (ok && mounted) await _loadMessages();
+    } catch (e) {
+      debugPrint('Error requesting audio file: $e');
+    }
   }
 
   Future<void> _openCircleRecorder() async {
@@ -854,8 +870,20 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       return;
     }
     final service = ref.read(tanglexServiceProvider);
-    await Future<void>.delayed(const Duration(milliseconds: 300));
-    await service.receiveFile(image.fileId!, approvedRelays: true, encrypt: true);
+    try {
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      final ok = await service.receiveFile(image.fileId!, approvedRelays: true, encrypt: true);
+      if (ok && mounted) {
+        await _loadMessages();
+      }
+    } catch (e) {
+      debugPrint('Error requesting file: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Ошибка загрузки файла')),
+        );
+      }
+    }
   }
 
   @override
@@ -871,14 +899,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   Widget build(BuildContext context) {
     final loc = AppLocalizations.of(context);
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
     final displayEntries = _buildDisplayEntries(_messages);
 
-    final chatBackground = isDark ? const Color(0xFF0E1115) : const Color(0xFFE9EDF3);
-    final headerBg = isDark ? const Color(0xFF1B1F26) : const Color(0xFFFFFFFF);
-    final inputBg = isDark ? const Color(0xFF1B1F26) : const Color(0xFFFFFFFF);
-    final textPrimary = isDark ? const Color(0xFFFFFFFF) : const Color(0xFF1D1F23);
-    final textSecondary = isDark ? const Color(0xFF9AA0A6) : const Color(0xFF6B6F76);
+    final chatBackground = const Color(0xFF000000);
+    final headerBg = const Color(0xFF111111);
+    final inputBg = const Color(0xFF111111);
+    final textPrimary = const Color(0xFFE8E8E8);
+    final textSecondary = const Color(0xFF808080);
 
     return Scaffold(
       backgroundColor: chatBackground,
@@ -915,7 +942,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           ),
         ],
       ),
-      body: Column(
+      body: SelectionArea(
+        child: Column(
         children: [
           if (_audioNowPlaying != null)
             AudioMiniPlayer(
@@ -971,9 +999,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               padding: const EdgeInsets.fromLTRB(8, 6, 8, 8),
               decoration: BoxDecoration(
                 color: inputBg,
-                border: Border(
+                border: const Border(
                   top: BorderSide(
-                    color: isDark ? const Color(0xFF38383A).withOpacity(0.5) : theme.colorScheme.outline.withOpacity(0.15),
+                    color: Color(0xFF333333),
                   ),
                 ),
               ),
@@ -984,12 +1012,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                     Container(
                       margin: const EdgeInsets.only(bottom: 6),
                       decoration: BoxDecoration(
-                        color: isDark ? const Color(0xFF1E232A) : const Color(0xFFF7F9FC),
+                        color: const Color(0xFF303030),
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(
-                          color: isDark
-                              ? const Color(0xFF3A3F47)
-                              : const Color(0xFFE2E6EB),
+                          color: const Color(0xFF3A3A3A),
                           width: 1,
                         ),
                       ),
@@ -1000,9 +1026,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                             height: 40,
                             margin: const EdgeInsets.only(left: 0, right: 10),
                             decoration: BoxDecoration(
-                              color: isDark
-                                  ? const Color(0xFF5A9CF5)
-                                  : const Color(0xFF6B8E5A),
+                              color: const Color(0xFF5A9CF5),
                               borderRadius: const BorderRadius.horizontal(
                                 left: Radius.circular(11),
                               ),
@@ -1017,12 +1041,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                                 children: [
                                   Text(
                                     _replyTo!.fromMe ? 'Вы' : widget.chatName,
-                                    style: TextStyle(
+                                    style: const TextStyle(
                                       fontSize: 12,
                                       fontWeight: FontWeight.w600,
-                                      color: isDark
-                                          ? const Color(0xFF5A9CF5)
-                                          : const Color(0xFF6B8E5A),
+                                      color: Color(0xFF5A9CF5),
                                     ),
                                   ),
                                   const SizedBox(height: 2),
@@ -1063,9 +1085,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                             style: TextStyle(color: textPrimary),
                             decoration: InputDecoration(
                               hintText: loc.translate('message_hint'),
-                              hintStyle: TextStyle(color: textSecondary),
+                              hintStyle: const TextStyle(color: Color(0xFF606060)),
                               filled: true,
-                              fillColor: isDark ? const Color(0xFF2A2F36) : const Color(0xFFF1F5F9),
+                              fillColor: const Color(0xFF222222),
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(18),
                                 borderSide: BorderSide.none,
@@ -1129,6 +1151,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             ),
           ),
         ],
+      ),
       ),
     );
   }

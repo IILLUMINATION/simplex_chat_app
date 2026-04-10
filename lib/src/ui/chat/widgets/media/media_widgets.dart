@@ -52,10 +52,13 @@ class MediaGrid extends StatelessWidget {
         final needsDownload = isIncoming &&
             !img.hasFullImage &&
             img.fileId != null &&
-            (img.fileStatusType == 'rcvInvitation' || img.fileStatusType == 'rcvTransfer');
+            img.fileStatusType == 'rcvInvitation';
+        final isDownloading = isIncoming &&
+            (img.fileStatusType == 'rcvTransfer' || img.fileStatusType == 'rcvAccepted');
         final isSending = fromMe && img.fileStatusType == 'sndTransfer';
         final showProgress = (img.fileStatusType == 'rcvTransfer' || img.fileStatusType == 'sndTransfer') &&
-            (img.transferTotal != null && img.transferTotal! > 0);
+            (img.transferTotal != null && img.transferTotal! > 0) &&
+            img.transferProgress != null;
         final progress = showProgress ? (img.transferProgress! / img.transferTotal!) : null;
         if (needsDownload) {
           child = Stack(
@@ -73,22 +76,44 @@ class MediaGrid extends StatelessWidget {
                       color: Colors.black54,
                       shape: BoxShape.circle,
                     ),
-                    child: Stack(
-                      alignment: Alignment.center,
-                      children: [
-                        SizedBox(
-                          width: 28,
-                          height: 28,
+                    child: const Icon(Icons.download, color: Colors.white, size: 26),
+                  ),
+                ),
+              ),
+            ],
+          );
+        } else if (isDownloading) {
+          child = Stack(
+            fit: StackFit.expand,
+            children: [
+              child,
+              Container(color: Colors.black26),
+              Center(
+                child: Container(
+                  width: 36,
+                  height: 36,
+                  decoration: const BoxDecoration(
+                    color: Colors.black54,
+                    shape: BoxShape.circle,
+                  ),
+                  child: showProgress
+                      ? SizedBox(
+                          width: 24,
+                          height: 24,
                           child: CircularProgressIndicator(
                             strokeWidth: 2,
                             value: progress,
                             valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
                           ),
+                        )
+                      : const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                          ),
                         ),
-                        const Icon(Icons.download, color: Colors.white),
-                      ],
-                    ),
-                  ),
                 ),
               ),
             ],

@@ -320,8 +320,8 @@ Uint8List prepareCirclePreview(Uint8List input) {
       width: size,
       height: size,
     );
-    final resized = img.copyResize(cropped, width: 320, height: 320);
-    return Uint8List.fromList(img.encodeJpg(resized, quality: 70));
+    final resized = img.copyResize(cropped, width: 200, height: 200);
+    return Uint8List.fromList(img.encodeJpg(resized, quality: 50));
   } catch (_) {
     return input;
   }
