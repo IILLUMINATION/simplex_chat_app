@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -11,6 +13,19 @@ import '../providers/persistent_store.dart';
 import '../service/tanglex_service.dart';
 import 'chat_screen.dart';
 import 'create_profile_screen.dart';
+
+// Dark theme colors matching chat_screen.dart
+const _kBgColor = Color(0xFF000000);
+const _kSurfaceColor = Color(0xFF111111);
+const _kTileColor = Color(0xFF191919);
+const _kTextPrimary = Color(0xFFE8E8E8);
+const _kTextSecondary = Color(0xFF808080);
+const _kHintText = Color(0xFF606060);
+const _kDivider = Color(0xFF333333);
+const _kAccent = Color(0xFF5A9CF5);
+const _kAvatarBg = Color(0xFF2A2A2A);
+const _kBorder = Color(0xFF3A3A3A);
+const _kQuotedBg = Color(0xFF303030);
 
 class ChatsScreen extends ConsumerStatefulWidget {
   const ChatsScreen({super.key});
@@ -121,6 +136,7 @@ class _ChatsScreenState extends ConsumerState<ChatsScreen> {
   void _openActionMenu() {
     showModalBottomSheet<void>(
       context: context,
+      backgroundColor: _kSurfaceColor,
       showDragHandle: true,
       builder: (ctx) => _ActionMenuSheet(
         onConnectViaLink: () {
@@ -140,20 +156,32 @@ class _ChatsScreenState extends ConsumerState<ChatsScreen> {
     showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text(AppLocalizations.of(context).translate('connect_button')),
+        backgroundColor: _kSurfaceColor,
+        title: Text(
+          AppLocalizations.of(context).translate('connect_button'),
+          style: const TextStyle(color: _kTextPrimary),
+        ),
         content: TextField(
           controller: controller,
+          style: const TextStyle(color: _kTextPrimary),
           decoration: InputDecoration(
             labelText: AppLocalizations.of(context).translate('connection_link_label'),
             hintText: 'smp://...',
-            border: const OutlineInputBorder(),
+            hintStyle: const TextStyle(color: _kHintText),
+            labelStyle: const TextStyle(color: _kTextSecondary),
+            border: const OutlineInputBorder(borderSide: BorderSide(color: _kBorder)),
+            enabledBorder: const OutlineInputBorder(borderSide: BorderSide(color: _kBorder)),
+            focusedBorder: const OutlineInputBorder(borderSide: BorderSide(color: _kAccent)),
           ),
           maxLines: 3,
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: Text(AppLocalizations.of(context).translate('cancel')),
+            child: Text(
+              AppLocalizations.of(context).translate('cancel'),
+              style: const TextStyle(color: _kTextSecondary),
+            ),
           ),
           FilledButton(
             onPressed: () async {
@@ -163,7 +191,6 @@ class _ChatsScreenState extends ConsumerState<ChatsScreen> {
               final ok = await service.connectViaLink(link);
               if (mounted) {
                 Navigator.pop(ctx);
-                final cs = Theme.of(context).colorScheme;
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
                     content: Text(
@@ -171,7 +198,7 @@ class _ChatsScreenState extends ConsumerState<ChatsScreen> {
                           ? AppLocalizations.of(context).translate('connection_request_sent')
                           : AppLocalizations.of(context).translate('failed_connect'),
                     ),
-                    backgroundColor: ok ? cs.onInverseSurface : cs.error,
+                    backgroundColor: ok ? _kTileColor : const Color(0xFFCF6679),
                   ),
                 );
                 if (ok) await _loadChats();
@@ -191,7 +218,7 @@ class _ChatsScreenState extends ConsumerState<ChatsScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(AppLocalizations.of(context).translate('core_not_initialized_yet')),
-          backgroundColor: Theme.of(context).colorScheme.tertiaryContainer,
+          backgroundColor: const Color(0xFFCF6679),
         ),
       );
       return;
@@ -200,11 +227,10 @@ class _ChatsScreenState extends ConsumerState<ChatsScreen> {
     final link = await service.createConnectionLink();
     if (!mounted) return;
     if (link == null) {
-      // Might already exist — try to fetch it
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(loc.translate('failed_create_link')),
-          backgroundColor: Theme.of(context).colorScheme.error,
+          backgroundColor: const Color(0xFFCF6679),
         ),
       );
       return;
@@ -212,25 +238,29 @@ class _ChatsScreenState extends ConsumerState<ChatsScreen> {
     showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text(loc.translate('your_link')),
+        backgroundColor: _kSurfaceColor,
+        title: Text(loc.translate('your_link'), style: const TextStyle(color: _kTextPrimary)),
         content: SelectableText(
           link,
-          style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+          style: const TextStyle(color: _kTextPrimary, fontFamily: 'monospace', fontSize: 12),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: Text(loc.translate('cancel')),
+            child: Text(loc.translate('cancel'), style: const TextStyle(color: _kTextSecondary)),
           ),
           TextButton(
             onPressed: () {
               Clipboard.setData(ClipboardData(text: link));
               Navigator.pop(ctx);
               ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text(loc.translate('link_copied'))),
+                SnackBar(
+                  content: Text(loc.translate('link_copied')),
+                  backgroundColor: _kTileColor,
+                ),
               );
             },
-            child: Text(loc.translate('copy')),
+            child: Text(loc.translate('copy'), style: const TextStyle(color: _kAccent)),
           ),
         ],
       ),
@@ -271,70 +301,90 @@ class _ChatsScreenState extends ConsumerState<ChatsScreen> {
       });
     }
 
-    return profileAsync.when(
-      loading: () => const Center(child: CircularProgressIndicator()),
-      error: (_, __) => _buildEmpty(loc, service),
-      data: (profile) {
-        _profile = profile;
+    return Scaffold(
+      backgroundColor: _kBgColor,
+      body: profileAsync.when(
+        loading: () => const Center(child: CircularProgressIndicator(color: _kAccent)),
+        error: (e, st) => _buildEmpty(loc, service),
+        data: (profile) {
+          _profile = profile;
 
-        if (!service.isInitialized) {
-          return _buildNotInitialized(loc, service);
-        }
+          if (!service.isInitialized) {
+            return _buildNotInitialized(loc, service);
+          }
 
-        if (_loading) {
-          return const Center(child: CircularProgressIndicator());
-        }
+          if (_loading) {
+            return const Center(child: CircularProgressIndicator(color: _kAccent));
+          }
 
-        if (_chats.isEmpty) {
-          return _buildEmpty(loc, service);
-        }
+          if (_chats.isEmpty) {
+            return _buildEmpty(loc, service);
+          }
 
-        return RefreshIndicator(
-          onRefresh: _loadChats,
-          child: ListView(
-            padding: const EdgeInsets.symmetric(vertical: 8),
+          final filteredChats = chats.where((c) =>
+              !(c.chatType == 'contact' &&
+                  (c.contactStatus != null && c.contactStatus != 'active'))).toList();
+
+          return Column(
             children: [
-              if (requests.isNotEmpty || pendingDirects.isNotEmpty) ...[
-                _SectionHeader(
-                  title: loc.translate('requests'),
-                  subtitle: loc.translate('incoming_contact_requests'),
+              // AppBar
+              Container(
+                padding: const EdgeInsets.fromLTRB(16, 48, 16, 0),
+                child: Row(
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.menu, color: _kTextPrimary),
+                      onPressed: () {},
+                    ),
+                    const Spacer(),
+                    IconButton(
+                      icon: const Icon(Icons.search, color: _kTextPrimary),
+                      onPressed: () {},
+                    ),
+                  ],
                 ),
-                ...requests.map((req) => _RequestTile(
-                      chat: req,
-                      onAccept: () => _acceptRequest(req),
-                      onReject: () => _rejectRequest(req),
-                    )),
-                ...pendingDirects.map((c) {
-                  final req = requestsByContactId[c.chatId];
-                  if (req != null) {
-                    return _RequestTile(
-                      chat: req,
-                      onAccept: () => _acceptRequest(req),
-                      onReject: () => _rejectRequest(req),
-                    );
-                  }
-                  return _PendingTile(chat: c);
-                }),
-                const SizedBox(height: 8),
-              ],
-              if (chats.isNotEmpty) ...[
-                _SectionHeader(
-                  title: loc.translate('chats'),
-                  subtitle: loc.translate('your_conversations'),
+              ),
+              // Chat list
+              Expanded(
+                child: RefreshIndicator(
+                  onRefresh: _loadChats,
+                  color: _kAccent,
+                  child: ListView(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    children: [
+                      if (requests.isNotEmpty || pendingDirects.isNotEmpty) ...[
+                        ...requests.map((req) => _RequestTile(
+                              chat: req,
+                              onAccept: () => _acceptRequest(req),
+                              onReject: () => _rejectRequest(req),
+                            )),
+                        ...pendingDirects.map((c) {
+                          final req = requestsByContactId[c.chatId];
+                          if (req != null) {
+                            return _RequestTile(
+                              chat: req,
+                              onAccept: () => _acceptRequest(req),
+                              onReject: () => _rejectRequest(req),
+                            );
+                          }
+                          return _PendingTile(chat: c);
+                        }),
+                        const Divider(color: _kDivider, height: 1),
+                      ],
+                      if (filteredChats.isNotEmpty) ...[
+                        ...filteredChats.map((chat) => _ChatTile(
+                              chat: chat,
+                              onTap: () => _openChat(context, chat),
+                            )),
+                      ],
+                    ],
+                  ),
                 ),
-                ...chats.where((c) =>
-                        !(c.chatType == 'contact' &&
-                            (c.contactStatus != null &&
-                                c.contactStatus != 'active')))
-                    .map((chat) => _ChatTile(
-                          chat: chat,
-                          onTap: () => _openChat(context, chat),
-                        )),
-              ],
+              ),
             ],
-          ),
-        );
-      },
+          );
+        },
+      ),
     );
   }
 
@@ -343,14 +393,14 @@ class _ChatsScreenState extends ConsumerState<ChatsScreen> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.chat_bubble_outline, size: 80,
-              color: Theme.of(context).colorScheme.outline),
+          const Icon(Icons.chat_bubble_outline, size: 80, color: _kTextSecondary),
           const SizedBox(height: 16),
           Text(
             loc.translate('core_not_initialized_chats'),
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  color: Theme.of(context).colorScheme.outline,
-                ),
+            style: const TextStyle(
+              fontSize: 16,
+              color: _kTextSecondary,
+            ),
           ),
           const SizedBox(height: 16),
           FilledButton.icon(
@@ -371,14 +421,14 @@ class _ChatsScreenState extends ConsumerState<ChatsScreen> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.chat_bubble_outline, size: 80,
-              color: Theme.of(context).colorScheme.outline),
+          const Icon(Icons.chat_bubble_outline, size: 80, color: _kTextSecondary),
           const SizedBox(height: 16),
           Text(
             loc.translate('no_chats_yet'),
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  color: Theme.of(context).colorScheme.outline,
-                ),
+            style: const TextStyle(
+              fontSize: 16,
+              color: _kTextSecondary,
+            ),
           ),
           const SizedBox(height: 8),
           if (_profile == null) ...[
@@ -405,7 +455,7 @@ class _ChatsScreenState extends ConsumerState<ChatsScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(loc.translate('chat_not_ready')),
-          backgroundColor: Theme.of(context).colorScheme.errorContainer,
+          backgroundColor: const Color(0xFFCF6679),
         ),
       );
       return;
@@ -434,11 +484,10 @@ class _ChatsScreenState extends ConsumerState<ChatsScreen> {
     final ok = await service.acceptContactRequest(reqId);
     if (mounted) {
       final loc = AppLocalizations.of(context);
-      final cs = Theme.of(context).colorScheme;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(ok ? loc.translate('request_accepted') : loc.translate('failed_accept_request')),
-          backgroundColor: ok ? cs.onInverseSurface : cs.error,
+          backgroundColor: ok ? _kTileColor : const Color(0xFFCF6679),
         ),
       );
     }
@@ -455,11 +504,10 @@ class _ChatsScreenState extends ConsumerState<ChatsScreen> {
     final ok = await service.rejectContactRequest(reqId);
     if (mounted) {
       final loc = AppLocalizations.of(context);
-      final cs = Theme.of(context).colorScheme;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(ok ? loc.translate('request_rejected') : loc.translate('failed_reject_request')),
-          backgroundColor: ok ? cs.onInverseSurface : cs.error,
+          backgroundColor: ok ? _kTileColor : const Color(0xFFCF6679),
         ),
       );
     }
@@ -489,13 +537,20 @@ class _ActionMenuSheet extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           ListTile(
-            leading: const Icon(Icons.qr_code_scanner),
-            title: Text(loc.translate('connect_by_link')),
+            leading: const Icon(Icons.qr_code_scanner, color: _kTextPrimary),
+            title: Text(
+              loc.translate('connect_by_link'),
+              style: const TextStyle(color: _kTextPrimary),
+            ),
             onTap: onConnectViaLink,
           ),
+          const Divider(color: _kDivider, height: 1),
           ListTile(
-            leading: const Icon(Icons.share),
-            title: Text(loc.translate('create_my_link')),
+            leading: const Icon(Icons.share, color: _kTextPrimary),
+            title: Text(
+              loc.translate('create_my_link'),
+              style: const TextStyle(color: _kTextPrimary),
+            ),
             onTap: onCreateLink,
           ),
         ],
@@ -513,50 +568,182 @@ class _ChatTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final loc = AppLocalizations.of(context);
-    final theme = Theme.of(context);
-    final timeStr = chat.timestamp != null
-        ? DateFormat.Hm().format(DateTime.fromMillisecondsSinceEpoch(chat.timestamp! ~/ 1000))
-        : '';
+    final timeStr = _formatTime(chat.timestamp);
     final initials = _initials(chat.displayName.isNotEmpty ? chat.displayName : chat.chatRef);
-    final avatarBg = chat.chatType == 'group'
-        ? theme.colorScheme.tertiaryContainer
-        : theme.colorScheme.primaryContainer;
-    final avatarFg = chat.chatType == 'group'
-        ? theme.colorScheme.onTertiaryContainer
-        : theme.colorScheme.onPrimaryContainer;
+    final lastMsg = chat.lastMessage.isNotEmpty
+        ? chat.lastMessage
+        : loc.translate('no_messages_yet');
+    final hasUnread = chat.unreadCount > 0;
 
-    return ListTile(
-      leading: CircleAvatar(
-        backgroundColor: avatarBg,
-        backgroundImage:
-            chat.avatarImage != null ? MemoryImage(chat.avatarImage!) : null,
-        child: chat.avatarImage == null
-            ? Text(
-                initials,
-                style: theme.textTheme.labelLarge?.copyWith(
-                  color: avatarFg,
-                  fontWeight: FontWeight.w700,
-                ),
-              )
-            : null,
-      ),
-      title: Text(
-        chat.displayName.isNotEmpty ? chat.displayName : chat.chatRef,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-      ),
-      subtitle: Text(
-        chat.lastMessage.isNotEmpty ? chat.lastMessage : loc.translate('no_messages_yet'),
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: theme.textTheme.bodyMedium?.copyWith(
-          color: theme.colorScheme.outline,
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Avatar
+            _AvatarWidget(
+              imageBytes: chat.avatarImage,
+              initials: initials,
+            ),
+            const SizedBox(width: 12),
+            // Content
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Top row: name + time/badge
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          chat.displayName.isNotEmpty
+                              ? chat.displayName
+                              : chat.chatRef,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: _kTextPrimary,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 15.5,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      // Time + badge column
+                      if (hasUnread)
+                        _Badge(count: chat.unreadCount)
+                      else if (timeStr.isNotEmpty)
+                        Text(
+                          timeStr,
+                          style: const TextStyle(
+                            color: _kTextSecondary,
+                            fontSize: 12,
+                          ),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 3),
+                  // Bottom row: message preview
+                  Text(
+                    lastMsg,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: hasUnread ? _kTextPrimary : _kTextSecondary,
+                      fontSize: 13.5,
+                      fontWeight: hasUnread ? FontWeight.w500 : FontWeight.w400,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
-      trailing: chat.unreadCount > 0
-          ? Badge(label: Text('${chat.unreadCount}'))
-          : (timeStr.isNotEmpty ? Text(timeStr, style: theme.textTheme.bodySmall) : null),
-      onTap: onTap,
+    );
+  }
+
+  String _formatTime(int? ts) {
+    if (ts == null) return '';
+    final dt = DateTime.fromMillisecondsSinceEpoch(ts ~/ 1000);
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final msgDate = DateTime(dt.year, dt.month, dt.day);
+    final diff = today.difference(msgDate).inDays;
+    if (diff == 0) {
+      return DateFormat.Hm().format(dt);
+    } else if (diff == 1) {
+      return _weekdayShort(dt);
+    } else if (diff < 7) {
+      return _weekdayShort(dt);
+    } else {
+      return '${dt.day}.${dt.month.toString().padLeft(2, '0')}';
+    }
+  }
+
+  String _weekdayShort(DateTime dt) {
+    const days = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];
+    return days[dt.weekday % 7];
+  }
+}
+
+class _AvatarWidget extends StatelessWidget {
+  final Uint8List? imageBytes;
+  final String initials;
+
+  const _AvatarWidget({
+    required this.imageBytes,
+    required this.initials,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    const size = 50.0;
+    Widget avatar;
+    if (imageBytes != null && imageBytes!.isNotEmpty) {
+      avatar = ClipOval(
+        child: Image.memory(
+          imageBytes!,
+          width: size,
+          height: size,
+          fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) => _initialsCircle(),
+        ),
+      );
+    } else {
+      avatar = _initialsCircle();
+    }
+    return SizedBox(width: size, height: size, child: avatar);
+  }
+
+  Widget _initialsCircle() {
+    final colors = [
+      const Color(0xFF5A9CF5),
+      const Color(0xFF6BC56E),
+      const Color(0xFFF5A623),
+      const Color(0xFFF06292),
+      const Color(0xFF9575CD),
+      const Color(0xFF4DD0E1),
+    ];
+    final colorIndex = initials.runes.fold<int>(0, (prev, r) => prev + r) % colors.length;
+    return CircleAvatar(
+      radius: 25,
+      backgroundColor: colors[colorIndex],
+      child: Text(
+        initials,
+        style: const TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.w700,
+          fontSize: 16,
+        ),
+      ),
+    );
+  }
+}
+
+class _Badge extends StatelessWidget {
+  final int count;
+
+  const _Badge({required this.count});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
+      decoration: const BoxDecoration(
+        color: _kAccent,
+        shape: BoxShape.circle,
+      ),
+      child: Text(
+        count > 99 ? '99+' : '$count',
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
     );
   }
 }
@@ -588,7 +775,6 @@ class _RequestTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final loc = AppLocalizations.of(context);
-    final theme = Theme.of(context);
     final title = chat.displayName.isNotEmpty
         ? chat.displayName
         : (chat.localDisplayName.isNotEmpty ? chat.localDisplayName : loc.translate('request'));
@@ -601,10 +787,13 @@ class _RequestTile extends StatelessWidget {
         ? loc.translate('wants_to_connect')
         : parts.join(' · ');
 
-    return Card(
+    return Container(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      color: theme.colorScheme.secondaryContainer,
-      elevation: 0,
+      decoration: BoxDecoration(
+        color: _kQuotedBg,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: _kBorder),
+      ),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         child: Row(
@@ -612,12 +801,13 @@ class _RequestTile extends StatelessWidget {
           children: [
             CircleAvatar(
               radius: 22,
-              backgroundColor: theme.colorScheme.secondary,
+              backgroundColor: _kAvatarBg,
               child: Text(
                 initials,
-                style: theme.textTheme.labelMedium?.copyWith(
-                  color: theme.colorScheme.onSecondary,
+                style: const TextStyle(
+                  color: _kTextPrimary,
                   fontWeight: FontWeight.w700,
+                  fontSize: 14,
                 ),
               ),
             ),
@@ -631,9 +821,10 @@ class _RequestTile extends StatelessWidget {
                     title,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.titleSmall?.copyWith(
+                    style: const TextStyle(
+                      color: _kTextPrimary,
                       fontWeight: FontWeight.w600,
-                      color: theme.colorScheme.onSecondaryContainer,
+                      fontSize: 14,
                     ),
                   ),
                   const SizedBox(height: 2),
@@ -641,8 +832,9 @@ class _RequestTile extends StatelessWidget {
                     subtitle,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.colorScheme.onSecondaryContainer.withOpacity(0.7),
+                    style: const TextStyle(
+                      color: _kTextSecondary,
+                      fontSize: 12,
                     ),
                   ),
                 ],
@@ -651,22 +843,30 @@ class _RequestTile extends StatelessWidget {
             const SizedBox(width: 8),
             OutlinedButton(
               style: OutlinedButton.styleFrom(
+                side: const BorderSide(color: _kBorder),
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
                 minimumSize: Size.zero,
                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
               onPressed: onReject,
-              child: Text(loc.translate('reject')),
+              child: Text(
+                loc.translate('reject'),
+                style: const TextStyle(color: _kTextSecondary),
+              ),
             ),
             const SizedBox(width: 6),
             FilledButton(
               style: FilledButton.styleFrom(
+                backgroundColor: _kAccent,
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
                 minimumSize: Size.zero,
                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
               onPressed: onAccept,
-              child: Text(loc.translate('accept')),
+              child: Text(
+                loc.translate('accept'),
+                style: const TextStyle(color: Colors.white),
+              ),
             ),
           ],
         ),
@@ -683,33 +883,40 @@ class _PendingTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final loc = AppLocalizations.of(context);
-    final theme = Theme.of(context);
     final title = chat.displayName.isNotEmpty ? chat.displayName : loc.translate('pending');
     final initials = _initials(title);
-    return Card(
+    return Container(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      color: theme.colorScheme.surfaceContainerHighest,
-      elevation: 0,
+      decoration: BoxDecoration(
+        color: _kQuotedBg,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: _kBorder),
+      ),
       child: ListTile(
         leading: CircleAvatar(
-          backgroundColor: theme.colorScheme.surfaceContainerHigh,
+          backgroundColor: _kAvatarBg,
           backgroundImage:
               chat.avatarImage != null ? MemoryImage(chat.avatarImage!) : null,
           child: chat.avatarImage == null
               ? Text(
                   initials,
-                  style: theme.textTheme.labelLarge?.copyWith(
-                    color: theme.colorScheme.onSurface,
+                  style: const TextStyle(
+                    color: _kTextPrimary,
                     fontWeight: FontWeight.w700,
+                    fontSize: 14,
                   ),
                 )
               : null,
         ),
-        title: Text(title),
+        title: Text(
+          title,
+          style: const TextStyle(color: _kTextPrimary),
+        ),
         subtitle: Text(
           loc.translate('pending_acceptance'),
-          style: theme.textTheme.bodySmall?.copyWith(
-            color: theme.colorScheme.outline,
+          style: const TextStyle(
+            color: _kTextSecondary,
+            fontSize: 12,
           ),
         ),
       ),
@@ -728,7 +935,6 @@ class _SectionHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 6),
       child: Column(
@@ -736,16 +942,19 @@ class _SectionHeader extends StatelessWidget {
         children: [
           Text(
             title,
-            style: theme.textTheme.titleSmall?.copyWith(
+            style: const TextStyle(
+              color: _kTextPrimary,
               fontWeight: FontWeight.w700,
+              fontSize: 14,
               letterSpacing: 0.2,
             ),
           ),
           const SizedBox(height: 2),
           Text(
             subtitle,
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: theme.colorScheme.outline,
+            style: const TextStyle(
+              color: _kTextSecondary,
+              fontSize: 12,
             ),
           ),
         ],
