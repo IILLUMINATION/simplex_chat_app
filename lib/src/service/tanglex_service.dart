@@ -717,21 +717,33 @@ class TanglexService {
   Future<bool> deleteUser(int userId, {bool deleteSmpQueues = false}) async {
     final cmd =
         '/_delete user $userId del_smp=${deleteSmpQueues ? 'on' : 'off'}';
+    _appendLog('deleteUser command: $cmd');
     final resp = await sendCommand(cmd);
-    if (resp == null) return false;
+    _appendLog('deleteUser response: $resp');
+    if (resp == null) {
+      _appendLog('deleteUser: null response');
+      return false;
+    }
     try {
       final json = Map<String, dynamic>.from(_decodeJson(resp));
+      _appendLog('deleteUser parsed: $json');
       if (json.containsKey('error')) {
         final errorObj = json['error'];
         final errorType = errorObj is Map ? errorObj['errorType'] : null;
         final errorCode = errorType is Map ? errorType['type'] : null;
+        _appendLog('deleteUser error: type=$errorCode obj=$errorObj');
         if (errorCode == 'chatNotStarted') {
+          _appendLog('deleteUser: retrying after _startChatIfPossible');
           await _startChatIfPossible();
           final retry = await sendCommand(cmd);
           if (retry == null) return false;
           final retryJson = Map<String, dynamic>.from(_decodeJson(retry));
-          if (retryJson.containsKey('error')) return false;
+          if (retryJson.containsKey('error')) {
+            _appendLog('deleteUser retry error: ${retryJson['error']}');
+            return false;
+          }
           final retryResult = retryJson['result'] as Map<String, dynamic>?;
+          _appendLog('deleteUser retry result: $retryResult');
           if (retryResult != null && retryResult['type'] == 'cmdOk') {
             if (_activeUserId == userId) _activeUserId = null;
             return true;
@@ -741,12 +753,16 @@ class TanglexService {
         return false;
       }
       final result = json['result'] as Map<String, dynamic>?;
+      _appendLog('deleteUser result: $result');
       if (result != null && result['type'] == 'cmdOk') {
         if (_activeUserId == userId) _activeUserId = null;
         return true;
       }
+      _appendLog('deleteUser: result type "${result?['type']}" is not cmdOk');
       return false;
-    } catch (_) {
+    } catch (e, st) {
+      _appendLog('deleteUser exception: $e');
+      _appendLog(st.toString());
       return false;
     }
   }
