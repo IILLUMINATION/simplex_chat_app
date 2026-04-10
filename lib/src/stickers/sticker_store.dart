@@ -266,4 +266,53 @@ class StickerStore {
       return null;
     }
   }
+
+  /// Export a sticker pack as a .sxpz zip file. Returns the path to the exported file.
+  Future<String?> exportPack({required String packId}) async {
+    final pack = _packs.where((p) => p.id == packId).firstOrNull;
+    if (pack == null) return null;
+    try {
+      final packDir = Directory('${(await _baseDir()).path}/$packId');
+      if (!packDir.existsSync()) return null;
+
+      final archive = Archive();
+
+      // Add manifest
+      final manifest = {
+        'packId': pack.id,
+        'name': pack.name,
+        'author': pack.author,
+        'cover': pack.coverPath?.split('/').last ?? '',
+        'stickers': pack.stickers
+            .map((s) => {'id': s.id, 'file': s.filePath.split('/').last})
+            .toList(),
+      };
+      final manifestBytes = utf8.encode(jsonEncode(manifest));
+      archive.addFile(ArchiveFile('manifest.json', manifestBytes.length, manifestBytes));
+
+      // Add sticker files
+      for (final sticker in pack.stickers) {
+        final file = File(sticker.filePath);
+        if (file.existsSync()) {
+          final bytes = file.readAsBytesSync();
+          final name = sticker.filePath.split('/').last;
+          archive.addFile(ArchiveFile(name, bytes.length, bytes));
+        }
+      }
+
+      // Create zip
+      final zipBytes = ZipEncoder().encode(archive);
+      if (zipBytes == null) return null;
+
+      // Save to Downloads or temp dir
+      final outDir = Directory('/storage/emulated/0/Download').existsSync()
+          ? Directory('/storage/emulated/0/Download')
+          : await getTemporaryDirectory();
+      final outPath = '${outDir.path}/$packId.sxpz';
+      File(outPath).writeAsBytesSync(zipBytes);
+      return outPath;
+    } catch (_) {
+      return null;
+    }
+  }
 }

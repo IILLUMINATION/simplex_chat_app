@@ -366,7 +366,8 @@ class TanglexService {
     try {
       final tmp = await getTemporaryDirectory();
       final ts = DateTime.now().millisecondsSinceEpoch;
-      final ext = filePath.toLowerCase().endsWith('.webp') ? 'webp' : 'webp';
+      final isWebmSrc = filePath.toLowerCase().endsWith('.webm');
+      final ext = isWebmSrc ? 'webm' : 'webp';
       final target =
           File('${tmp.path}/st__${packId}__${stickerId}__$ts.$ext');
       final src = File(filePath);
