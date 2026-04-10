@@ -325,63 +325,39 @@ class _ChatsScreenState extends ConsumerState<ChatsScreen> {
               !(c.chatType == 'contact' &&
                   (c.contactStatus != null && c.contactStatus != 'active'))).toList();
 
-          return Column(
-            children: [
-              // AppBar
-              Container(
-                padding: const EdgeInsets.fromLTRB(16, 48, 16, 0),
-                child: Row(
-                  children: [
-                    IconButton(
-                      icon: const Icon(Icons.menu, color: _kTextPrimary),
-                      onPressed: () {},
-                    ),
-                    const Spacer(),
-                    IconButton(
-                      icon: const Icon(Icons.search, color: _kTextPrimary),
-                      onPressed: () {},
-                    ),
-                  ],
-                ),
-              ),
-              // Chat list
-              Expanded(
-                child: RefreshIndicator(
-                  onRefresh: _loadChats,
-                  color: _kAccent,
-                  child: ListView(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    children: [
-                      if (requests.isNotEmpty || pendingDirects.isNotEmpty) ...[
-                        ...requests.map((req) => _RequestTile(
-                              chat: req,
-                              onAccept: () => _acceptRequest(req),
-                              onReject: () => _rejectRequest(req),
-                            )),
-                        ...pendingDirects.map((c) {
-                          final req = requestsByContactId[c.chatId];
-                          if (req != null) {
-                            return _RequestTile(
-                              chat: req,
-                              onAccept: () => _acceptRequest(req),
-                              onReject: () => _rejectRequest(req),
-                            );
-                          }
-                          return _PendingTile(chat: c);
-                        }),
-                        const Divider(color: _kDivider, height: 1),
-                      ],
-                      if (filteredChats.isNotEmpty) ...[
-                        ...filteredChats.map((chat) => _ChatTile(
-                              chat: chat,
-                              onTap: () => _openChat(context, chat),
-                            )),
-                      ],
-                    ],
-                  ),
-                ),
-              ),
-            ],
+          return RefreshIndicator(
+            onRefresh: _loadChats,
+            color: _kAccent,
+            child: ListView(
+              padding: const EdgeInsets.only(bottom: 8),
+              children: [
+                if (requests.isNotEmpty || pendingDirects.isNotEmpty) ...[
+                  ...requests.map((req) => _RequestTile(
+                        chat: req,
+                        onAccept: () => _acceptRequest(req),
+                        onReject: () => _rejectRequest(req),
+                      )),
+                  ...pendingDirects.map((c) {
+                    final req = requestsByContactId[c.chatId];
+                    if (req != null) {
+                      return _RequestTile(
+                        chat: req,
+                        onAccept: () => _acceptRequest(req),
+                        onReject: () => _rejectRequest(req),
+                      );
+                    }
+                    return _PendingTile(chat: c);
+                  }),
+                  const Divider(color: _kDivider, height: 1),
+                ],
+                if (filteredChats.isNotEmpty) ...[
+                  ...filteredChats.map((chat) => _ChatTile(
+                        chat: chat,
+                        onTap: () => _openChat(context, chat),
+                      )),
+                ],
+              ],
+            ),
           );
         },
       ),

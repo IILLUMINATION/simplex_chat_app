@@ -18,6 +18,7 @@ class HomeScreen extends ConsumerStatefulWidget {
 class _HomeScreenState extends ConsumerState<HomeScreen> {
   int _currentIndex = 0;
   bool _coreInitializing = false;
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
   static const _screens = [
     ChatsScreen(),
@@ -50,21 +51,22 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final loc = AppLocalizations.of(context);
 
     return Scaffold(
+      key: _scaffoldKey,
+      drawer: _buildDrawer(context, loc),
       appBar: AppBar(
-        title: Text([
-          loc.translate('chats'),
-          loc.translate('profile'),
-        ][_currentIndex]),
+        title: const Text('TangleX Chat'),
+        leading: _currentIndex == 0
+            ? IconButton(
+                icon: const Icon(Icons.menu),
+                onPressed: () => _scaffoldKey.currentState?.openDrawer(),
+              )
+            : null,
         actions: [
           IconButton(
-            icon: const Icon(Icons.bug_report),
-            onPressed: () => _openDebug(context),
-            tooltip: loc.translate('debug_console'),
-          ),
-          IconButton(
-            icon: const Icon(Icons.settings),
-            onPressed: () => _openSettings(context),
-            tooltip: loc.translate('settings'),
+            icon: const Icon(Icons.search),
+            onPressed: () {
+              // TODO: implement search
+            },
           ),
         ],
       ),
@@ -108,6 +110,83 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => const SettingsScreen()),
+    );
+  }
+
+  Widget _buildDrawer(BuildContext context, AppLocalizations loc) {
+    return Drawer(
+      backgroundColor: const Color(0xFF000000),
+      child: SafeArea(
+        child: Column(
+          children: [
+            DrawerHeader(
+              decoration: const BoxDecoration(
+                border: Border(
+                  bottom: BorderSide(color: Color(0xFF333333), width: 1),
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  const CircleAvatar(
+                    radius: 30,
+                    backgroundColor: Color(0xFF2A2A2A),
+                    child: Icon(Icons.person, size: 30, color: Color(0xFF808080)),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    loc.translate('profile'),
+                    style: const TextStyle(
+                      color: Color(0xFFE8E8E8),
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.search, color: Color(0xFF808080)),
+              title: Text(
+                loc.translate('search'),
+                style: const TextStyle(color: Color(0xFFE8E8E8)),
+              ),
+              onTap: () {
+                Navigator.pop(context);
+                // TODO: open search
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.settings, color: Color(0xFF808080)),
+              title: Text(
+                loc.translate('settings'),
+                style: const TextStyle(color: Color(0xFFE8E8E8)),
+              ),
+              onTap: () {
+                Navigator.pop(context);
+                _openSettings(context);
+              },
+            ),
+            const Spacer(),
+            const Divider(color: Color(0xFF333333), height: 1),
+            ListTile(
+              leading: const Icon(Icons.bug_report, color: Color(0xFF808080)),
+              title: Text(
+                loc.translate('debug_console'),
+                style: const TextStyle(color: Color(0xFF808080)),
+              ),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const DebugScreenWrapper()),
+                );
+              },
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
