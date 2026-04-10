@@ -628,9 +628,20 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
   List<Widget> _buildDisplayItems(List<_UiMessage> messages) {
     final items = <Widget>[];
+    DateTime? lastDate;
     int i = 0;
     while (i < messages.length) {
       final m = messages[i];
+      
+      // Добавляем разделитель даты если дата изменилась
+      if (m.time != null) {
+        final msgDate = DateTime(m.time!.year, m.time!.month, m.time!.day);
+        if (lastDate == null || msgDate != lastDate) {
+          items.add(_DateDivider(date: m.time!));
+          lastDate = msgDate;
+        }
+      }
+      
       if (!m.isSystem && m.images.isNotEmpty) {
         final group = <_UiMessage>[m];
         int j = i + 1;
@@ -884,15 +895,40 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final theme = Theme.of(context);
     final initials = _initials(widget.chatName);
     final displayItems = _buildDisplayItems(_messages);
+    final isDark = theme.brightness == Brightness.dark;
+
+    // Адаптивные цвета для кастомной темы чата
+    final chatBackground = isDark ? const Color(0xFF0E0E0E) : theme.colorScheme.surface;
+    final headerBg = isDark ? const Color(0xFF1C1C1D) : theme.colorScheme.surface;
+    final inputBg = isDark ? const Color(0xFF1C1C1D) : theme.colorScheme.surfaceContainerHighest;
+    final textPrimary = isDark ? const Color(0xFFFFFFFF) : theme.colorScheme.onSurface;
+    final textSecondary = isDark ? const Color(0xFF8E8E93) : theme.colorScheme.outline;
 
     return Scaffold(
+      backgroundColor: chatBackground,
       appBar: AppBar(
-        titleSpacing: 0,
+        backgroundColor: headerBg,
+        elevation: 0,
+        leading: IconButton(
+          icon: Icon(Icons.arrow_back, color: textPrimary),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+        title: Text(
+          widget.chatName,
+          style: TextStyle(
+            color: textPrimary,
+            fontSize: 17,
+            fontWeight: FontWeight.w600,
+            letterSpacing: -0.4,
+          ),
+          overflow: TextOverflow.ellipsis,
+        ),
         actions: [
           IconButton(
             tooltip: loc.translate('hd_download'),
             icon: Icon(
               _enableFileReceive ? Icons.cloud_download : Icons.cloud_off,
+              color: textSecondary,
             ),
             onPressed: () async {
               final enabled = await showModalBottomSheet<bool>(
@@ -919,32 +955,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             },
           ),
         ],
-        title: Row(
-          children: [
-            CircleAvatar(
-              radius: 18,
-              backgroundColor: theme.colorScheme.primaryContainer,
-              backgroundImage:
-                  widget.avatarImage != null ? MemoryImage(widget.avatarImage!) : null,
-              child: widget.avatarImage == null
-                  ? Text(
-                      initials,
-                      style: theme.textTheme.labelLarge?.copyWith(
-                        color: theme.colorScheme.onPrimaryContainer,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    )
-                  : null,
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                widget.chatName,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-          ],
-        ),
       ),
       body: Column(
         children: [
@@ -955,110 +965,84 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             ),
           // Messages list
           Expanded(
-            child: Stack(
-              children: [
-                Container(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: [
-                        theme.colorScheme.surface,
-                        theme.colorScheme.surfaceContainerLowest,
-                      ],
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                    ),
-                  ),
-                ),
-                Positioned.fill(
-                  child: CustomPaint(
-                    painter: _ChatPatternPainter(
-                      dotColor: theme.colorScheme.outline.withOpacity(0.08),
-                    ),
-                  ),
-                ),
-                _loading
-                    ? const Center(child: CircularProgressIndicator())
-                    : _messages.isEmpty
-                        ? Center(
-                            child: Text(
-                              loc.translate('no_messages_yet'),
-                              style:
-                                  TextStyle(color: theme.colorScheme.outline),
+            child: _loading
+                ? const Center(child: CircularProgressIndicator())
+                : _messages.isEmpty
+                    ? Center(
+                        child: Text(
+                          loc.translate('no_messages_yet'),
+                          style: TextStyle(color: textSecondary),
+                        ),
+                      )
+                    : Column(
+                        children: [
+                          if (_pinStore.getPinCount(widget.chatRef) > 0)
+                            _PinnedBar(
+                              pinned: _pinStore.getPinned(widget.chatRef),
+                              onPinTap: (pm) {
+                                _scrollToMessage(pm.key);
+                              },
+                              onUnpin: (pm) {
+                                _pinStore.unpin(widget.chatRef, pm.key);
+                                setState(() {});
+                              },
                             ),
-                          )
-                        : Column(
-                            children: [
-                              if (_pinStore.getPinCount(widget.chatRef) > 0)
-                                _PinnedBar(
-                                  pinned: _pinStore.getPinned(widget.chatRef),
-                                  onPinTap: (pm) {
-                                    _scrollToMessage(pm.key);
-                                  },
-                                  onUnpin: (pm) {
-                                    _pinStore.unpin(widget.chatRef, pm.key);
-                                    setState(() {});
-                                  },
-                                ),
-                              Expanded(
-                                child: ListView.builder(
-                                  controller: _scrollController,
-                            reverse: true,
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 10,
-                              vertical: 12,
-                            ),
-                            itemCount: displayItems.length,
-                            itemBuilder: (context, index) {
-                              final item = displayItems[index];
-                              return item;
-                            },
-                          ),
+                          Expanded(
+                            child: ListView.builder(
+                              controller: _scrollController,
+                              reverse: true,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 8,
                               ),
-                            ],
+                              itemCount: displayItems.length,
+                              itemBuilder: (context, index) {
+                                final item = displayItems[index];
+                                return item;
+                              },
+                            ),
                           ),
-              ],
-            ),
+                        ],
+                      ),
           ),
-          const Divider(height: 1),
 
           // Message input
           SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(12, 6, 12, 10),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.surfaceContainerHigh,
-                  borderRadius: BorderRadius.circular(24),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.08),
-                      blurRadius: 16,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
+            child: Container(
+              padding: const EdgeInsets.fromLTRB(8, 6, 8, 8),
+              decoration: BoxDecoration(
+                color: inputBg,
+                border: Border(
+                  top: BorderSide(
+                    color: isDark
+                        ? const Color(0xFF38383A).withOpacity(0.5)
+                        : theme.colorScheme.outline.withOpacity(0.15),
+                  ),
                 ),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    IconButton(
-                      onPressed: _sendingMedia ? null : _openAttachMenu,
-                      icon: const Icon(Icons.attach_file),
-                    ),
-                    IconButton(
-                      onPressed: _sendingMedia ? null : _openStickerPicker,
-                      icon: const Icon(Icons.emoji_emotions_outlined),
-                    ),
-                    IconButton(
-                      onPressed: _sendingMedia ? null : _openCircleRecorder,
-                      icon: const Icon(Icons.fiber_manual_record),
-                    ),
-                    Expanded(
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  IconButton(
+                    onPressed: _sendingMedia ? null : _openAttachMenu,
+                    icon: Icon(Icons.attach_file, color: textSecondary),
+                    constraints: const BoxConstraints(),
+                    padding: const EdgeInsets.all(8),
+                  ),
+                  Expanded(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxHeight: 120),
                       child: TextField(
                         controller: _msgController,
+                        style: TextStyle(color: textPrimary),
                         decoration: InputDecoration(
                           hintText: loc.translate('message_hint'),
+                          hintStyle: TextStyle(color: textSecondary),
                           border: InputBorder.none,
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 8,
+                          ),
                         ),
                         maxLines: 4,
                         minLines: 1,
@@ -1066,20 +1050,36 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                         onSubmitted: (_) => _sendMessage(),
                       ),
                     ),
-                    const SizedBox(width: 6),
-                    IconButton.filled(
-                      onPressed: _sending ? null : _sendMessage,
-                      icon: _sending
-                          ? const SizedBox(
-                              width: 20,
-                              height: 20,
-                              child:
-                                  CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(Icons.send),
-                    ),
-                  ],
-                ),
+                  ),
+                  const SizedBox(width: 4),
+                  ValueListenableBuilder(
+                    valueListenable: _msgController,
+                    builder: (context, value, child) {
+                      final hasText = value.text.trim().isNotEmpty;
+                      return IconButton(
+                        onPressed: hasText && !_sending
+                            ? _sendMessage
+                            : _sendingMedia
+                                ? null
+                                : _openCircleRecorder,
+                        icon: _sending
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : Icon(
+                                hasText ? Icons.send : Icons.mic,
+                                color: hasText
+                                    ? theme.colorScheme.primary
+                                    : textSecondary,
+                              ),
+                        constraints: const BoxConstraints(),
+                        padding: const EdgeInsets.all(8),
+                      );
+                    },
+                  ),
+                ],
               ),
             ),
           ),
@@ -1117,6 +1117,14 @@ class _MessageBubble extends StatelessWidget {
     final status = message.status;
     final timeStr = message.timeStr;
     final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    
+    // Цвета для бабблов
+    final incomingBubble = isDark ? const Color(0xFF2C2C2E) : theme.colorScheme.surfaceContainerHighest;
+    final outgoingBubble = isDark ? const Color(0xFF2C2C2E) : theme.colorScheme.primaryContainer;
+    final textPrimary = isDark ? const Color(0xFFFFFFFF) : theme.colorScheme.onSurface;
+    final textSecondary = isDark ? const Color(0xFF8E8E93) : theme.colorScheme.outline;
+    
     final isVideoOnly = message.images.length == 1 &&
         message.images.first.isVideo &&
         message.images.first.isCircle &&
@@ -1125,14 +1133,14 @@ class _MessageBubble extends StatelessWidget {
         message.images.first.isSticker &&
         text.isEmpty;
     final hasSticker = message.images.any((e) => e.isSticker);
-    final bubbleColor = isVideoOnly || isStickerOnly
+    final isBigEmoji = text.isNotEmpty && 
+        !hasSticker && 
+        message.images.isEmpty &&
+        _isOnlyEmojis(text);
+    
+    final bubbleColor = isVideoOnly || isStickerOnly || isBigEmoji
         ? Colors.transparent
-        : (fromMe
-            ? theme.colorScheme.primaryContainer
-            : theme.colorScheme.surfaceContainerHighest);
-    final textColor = fromMe
-        ? theme.colorScheme.onPrimaryContainer
-        : theme.colorScheme.onSurface;
+        : (fromMe ? outgoingBubble : incomingBubble);
 
     return Align(
       alignment: fromMe ? Alignment.centerRight : Alignment.centerLeft,
@@ -1140,113 +1148,126 @@ class _MessageBubble extends StatelessWidget {
         behavior: HitTestBehavior.translucent,
         onTap: onTap,
         child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 6),
-        padding: isVideoOnly || isStickerOnly
-            ? const EdgeInsets.all(2)
-            : (hasSticker
-                ? const EdgeInsets.all(4)
-                : const EdgeInsets.symmetric(horizontal: 12, vertical: 8)),
-        constraints: BoxConstraints(
-          maxWidth: MediaQuery.of(context).size.width * 0.75,
-        ),
-        decoration: BoxDecoration(
-          color: hasSticker ? Colors.transparent : bubbleColor,
-          borderRadius: hasSticker
-              ? null
-              : BorderRadius.only(
-            topLeft: const Radius.circular(18),
-            topRight: const Radius.circular(18),
-            bottomLeft: Radius.circular(fromMe ? 18 : 6),
-            bottomRight: Radius.circular(fromMe ? 6 : 18),
+          margin: const EdgeInsets.symmetric(vertical: 2, horizontal: 6),
+          padding: isVideoOnly || isStickerOnly
+              ? const EdgeInsets.all(2)
+              : (hasSticker
+                  ? const EdgeInsets.all(4)
+                  : const EdgeInsets.symmetric(horizontal: 12, vertical: 8)),
+          constraints: BoxConstraints(
+            maxWidth: MediaQuery.of(context).size.width * 0.78,
           ),
-          boxShadow: (isVideoOnly || isStickerOnly || hasSticker)
-              ? const []
-              : [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.06),
-                    blurRadius: 10,
-                    offset: const Offset(0, 3),
+          decoration: BoxDecoration(
+            color: hasSticker || isBigEmoji ? Colors.transparent : bubbleColor,
+            borderRadius: hasSticker || isBigEmoji
+                ? null
+                : BorderRadius.only(
+                    topLeft: const Radius.circular(18),
+                    topRight: const Radius.circular(18),
+                    bottomLeft: Radius.circular(fromMe ? 18 : 4),
+                    bottomRight: Radius.circular(fromMe ? 4 : 18),
                   ),
-                ],
-        ),
-        child: Column(
-          crossAxisAlignment:
-              fromMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-          children: [
-            if (message.fileName != null && message.audio == null) ...[
-              // Показываем файл ТОЛЬКО если это НЕ аудио
-              _FileAttachment(
-                fileName: message.fileName!,
-                fileSize: message.fileSize,
-                filePath: message.filePath,
-                fromMe: fromMe,
-              ),
-              if (text.isNotEmpty) const SizedBox(height: 6),
-            ],
-            if (message.audio != null) ...[
-              _AudioBubble(
-                audio: message.audio!,
-                fromMe: fromMe,
-                onPlay: () => onPlayAudio(message.audio!),
-                audioPlayer: audioPlayer,
-                nowPlaying: nowPlaying,
-              ),
-              const SizedBox(height: 6),
-            ],
-            if (message.images.isNotEmpty) ...[
-              if (isStickerOnly)
-                _StickerView(image: message.images.first)
-              else
-              _MediaGrid(
-                images: message.images,
-                fromMe: message.fromMe,
-                onOpen: (i) => onOpenMedia(message.images, i),
-                onDownload: (i) => onDownloadImage(message.images[i]),
-              ),
-              if (text.isNotEmpty) const SizedBox(height: 6),
-            ],
-            if (text.isNotEmpty)
-              _MarkdownText(
-                text: text,
-                textColor: textColor,
-              ),
-            const SizedBox(height: 6),
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (isPinned) ...[
-                  Icon(
-                    Icons.push_pin,
-                    size: 12,
-                    color: theme.colorScheme.primary,
-                  ),
-                  const SizedBox(width: 3),
-                ],
-                if (timeStr.isNotEmpty)
-                  Text(
-                    timeStr,
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: theme.colorScheme.outline,
-                    ),
-                  ),
-                if (status.isNotEmpty) ...[
-                  const SizedBox(width: 6),
-                  Text(
-                    status,
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: theme.colorScheme.outline,
-                    ),
-                  ),
-                ],
+          ),
+          child: Column(
+            crossAxisAlignment:
+                fromMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+            children: [
+              if (message.fileName != null && message.audio == null) ...[
+                _FileAttachment(
+                  fileName: message.fileName!,
+                  fileSize: message.fileSize,
+                  filePath: message.filePath,
+                  fromMe: fromMe,
+                ),
+                if (text.isNotEmpty) const SizedBox(height: 6),
               ],
-            ),
-          ],
+              if (message.audio != null) ...[
+                _AudioBubble(
+                  audio: message.audio!,
+                  fromMe: fromMe,
+                  onPlay: () => onPlayAudio(message.audio!),
+                  audioPlayer: audioPlayer,
+                  nowPlaying: nowPlaying,
+                ),
+                const SizedBox(height: 6),
+              ],
+              if (message.images.isNotEmpty) ...[
+                if (isStickerOnly)
+                  _StickerView(image: message.images.first)
+                else
+                  _MediaGrid(
+                    images: message.images,
+                    fromMe: message.fromMe,
+                    onOpen: (i) => onOpenMedia(message.images, i),
+                    onDownload: (i) => onDownloadImage(message.images[i]),
+                  ),
+                if (text.isNotEmpty) const SizedBox(height: 6),
+              ],
+              if (text.isNotEmpty)
+                isBigEmoji
+                    ? Text(
+                        text,
+                        style: const TextStyle(fontSize: 48, height: 1.1),
+                      )
+                    : _MarkdownText(
+                        text: text,
+                        textColor: textPrimary,
+                      ),
+              if (!isBigEmoji) const SizedBox(height: 4),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (isPinned) ...[
+                    Icon(
+                      Icons.push_pin,
+                      size: 10,
+                      color: textSecondary,
+                    ),
+                    const SizedBox(width: 2),
+                  ],
+                  if (timeStr.isNotEmpty)
+                    Text(
+                      timeStr,
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: textSecondary,
+                      ),
+                    ),
+                  if (status.isNotEmpty) ...[
+                    const SizedBox(width: 4),
+                    Icon(
+                      status == '✓✓' ? Icons.done_all : Icons.done,
+                      size: 14,
+                      color: textSecondary,
+                    ),
+                  ],
+                ],
+              ),
+            ],
+          ),
         ),
       ),
-      ), // GestureDetector
     );
+  }
+
+  bool _isOnlyEmojis(String text) {
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) return false;
+    
+    // Простая проверка: разбиваем на графемы и проверяем каждую
+    final graphemes = trimmed.split('');
+    final emojiOnly = graphemes.every((char) {
+      final code = char.codeUnitAt(0);
+      // Проверяем базовые диапазоны эмодзи
+      return (code >= 0x1F600 && code <= 0x1F64F) || // Emoticons
+          (code >= 0x1F300 && code <= 0x1F5FF) || // Misc Symbols and Pictographs
+          (code >= 0x1F680 && code <= 0x1F6FF) || // Transport and Map
+          (code >= 0x1F900 && code <= 0x1F9FF) || // Supplemental Symbols
+          (code >= 0x2600 && code <= 0x26FF) || // Misc symbols
+          (code >= 0x2700 && code <= 0x27BF); // Dingbats
+    });
+    
+    return emojiOnly && graphemes.length <= 3;
   }
 }
 
@@ -1514,95 +1535,102 @@ class _PinnedBarState extends State<_PinnedBar> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
     final pins = widget.pinned;
     if (pins.isEmpty) return const SizedBox.shrink();
 
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.primaryContainer.withOpacity(0.7),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: theme.colorScheme.outline.withOpacity(0.15),
+    final pm = pins[_currentPage];
+    final textColor = isDark ? const Color(0xFF8E8E93) : theme.colorScheme.outline;
+    final lineColor = isDark ? const Color(0xFF636366) : theme.colorScheme.outline;
+
+    return GestureDetector(
+      onTap: () => widget.onPinTap(pm),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: isDark
+              ? const Color(0xFF1C1C1E)
+              : theme.colorScheme.surfaceContainerHighest.withOpacity(0.5),
+          border: Border(
+            bottom: BorderSide(
+              color: isDark
+                  ? const Color(0xFF38383A).withOpacity(0.5)
+                  : theme.colorScheme.outline.withOpacity(0.15),
+            ),
+          ),
         ),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          SizedBox(
-            height: 32,
-            child: PageView.builder(
-              controller: _pageCtrl,
-              onPageChanged: (i) => setState(() => _currentPage = i),
-              itemCount: pins.length,
-              itemBuilder: (context, index) {
-                final pm = pins[index];
-                return GestureDetector(
-                  onTap: () => widget.onPinTap(pm),
-                  child: Row(
+        child: Row(
+          children: [
+            Container(
+              width: 3,
+              height: 32,
+              margin: const EdgeInsets.only(right: 10),
+              decoration: BoxDecoration(
+                color: lineColor,
+                borderRadius: BorderRadius.circular(1.5),
+              ),
+            ),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
                     children: [
-                      Icon(Icons.push_pin, size: 16,
-                          color: theme.colorScheme.primary),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: Text(
-                          pm.text.isNotEmpty
-                              ? (pm.text.length > 60
-                                  ? '${pm.text.substring(0, 60)}…'
-                                  : pm.text)
-                              : '📷 ${pm.timeStr}',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: theme.colorScheme.onPrimaryContainer,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
+                      Icon(
+                        Icons.push_pin,
+                        size: 12,
+                        color: textColor,
                       ),
-                      if (pins.length > 1) ...[
-                        const SizedBox(width: 4),
-                        Text(
-                          '${index + 1}/${pins.length}',
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: theme.colorScheme.outline,
-                            fontSize: 10,
-                          ),
-                        ),
-                      ],
                       const SizedBox(width: 4),
-                      GestureDetector(
-                        onTap: () => widget.onUnpin(pm),
-                        child: Icon(Icons.close, size: 16,
-                            color: theme.colorScheme.outline),
+                      Text(
+                        'Закреплённое',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: textColor,
+                          fontWeight: FontWeight.w500,
+                        ),
                       ),
                     ],
                   ),
-                );
-              },
-            ),
-          ),
-          if (pins.length > 1) ...[
-            const SizedBox(height: 4),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: List.generate(
-                pins.length,
-                (i) => Container(
-                  width: 6,
-                  height: 6,
-                  margin: const EdgeInsets.symmetric(horizontal: 2),
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: theme.colorScheme.outline.withOpacity(
-                      _currentPage == i ? 0.8 : 0.3,
+                  const SizedBox(height: 2),
+                  Text(
+                    pm.text.isNotEmpty
+                        ? (pm.text.length > 80
+                            ? '${pm.text.substring(0, 80)}…'
+                            : pm.text)
+                        : '📷 ${pm.timeStr}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: isDark ? const Color(0xFFAEAEB2) : theme.colorScheme.onSurfaceVariant,
                     ),
                   ),
+                ],
+              ),
+            ),
+            if (pins.length > 1) ...[
+              const SizedBox(width: 6),
+              Text(
+                '${_currentPage + 1}/${pins.length}',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: textColor,
                 ),
+              ),
+              const SizedBox(width: 6),
+            ],
+            GestureDetector(
+              onTap: () => widget.onUnpin(pm),
+              child: Icon(
+                Icons.close,
+                size: 18,
+                color: textColor,
               ),
             ),
           ],
-        ],
+        ),
       ),
     );
   }
@@ -1616,19 +1644,72 @@ class _SystemBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
     return Center(
       child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 8),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        margin: const EdgeInsets.symmetric(vertical: 12, horizontal: 32),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
         decoration: BoxDecoration(
-          color: theme.colorScheme.surfaceContainerHigh.withOpacity(0.85),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: theme.colorScheme.outline.withOpacity(0.2)),
+          color: isDark
+              ? const Color(0xFF1C1C1E).withOpacity(0.8)
+              : theme.colorScheme.surfaceContainerHighest.withOpacity(0.6),
+          borderRadius: BorderRadius.circular(14),
         ),
         child: Text(
           text,
-          style: theme.textTheme.bodySmall?.copyWith(
-            color: theme.colorScheme.outline,
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontSize: 13,
+            color: isDark ? const Color(0xFF8E8E93) : theme.colorScheme.outline,
+            fontWeight: FontWeight.w400,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DateDivider extends StatelessWidget {
+  final DateTime date;
+
+  const _DateDivider({required this.date});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final dateDay = DateTime(date.year, date.month, date.day);
+    final yesterday = today.subtract(const Duration(days: 1));
+
+    String label;
+    if (dateDay == today) {
+      label = 'Сегодня';
+    } else if (dateDay == yesterday) {
+      label = 'Вчера';
+    } else {
+      label = DateFormat('d MMMM', 'ru').format(date);
+    }
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: Center(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
+          decoration: BoxDecoration(
+            color: isDark
+                ? const Color(0xFF1C1C1E).withOpacity(0.85)
+                : theme.colorScheme.surfaceContainerHighest.withOpacity(0.7),
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: 13,
+              color: isDark ? const Color(0xFFAEAEB2) : theme.colorScheme.onSurfaceVariant,
+              fontWeight: FontWeight.w500,
+            ),
           ),
         ),
       ),
@@ -1648,12 +1729,17 @@ class _AudioMiniPlayer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHigh,
+        color: isDark ? const Color(0xFF1C1C1D) : theme.colorScheme.surfaceContainerHigh,
         border: Border(
-          bottom: BorderSide(color: theme.colorScheme.outline.withOpacity(0.1)),
+          bottom: BorderSide(
+            color: isDark
+                ? const Color(0xFF38383A).withOpacity(0.5)
+                : theme.colorScheme.outline.withOpacity(0.15),
+          ),
         ),
       ),
       child: Row(
@@ -1739,17 +1825,24 @@ class _FileAttachment extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
     final iconColor = fromMe
-        ? theme.colorScheme.onPrimaryContainer
-        : theme.colorScheme.onSurface;
+        ? (isDark ? const Color(0xFFFFFFFF) : theme.colorScheme.onPrimaryContainer)
+        : (isDark ? const Color(0xFFFFFFFF) : theme.colorScheme.onSurface);
+    final fileIconColor = isDark ? const Color(0xFF0A84FF) : theme.colorScheme.primary;
+    
     return Container(
       constraints: const BoxConstraints(maxWidth: 260),
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHighest.withOpacity(0.5),
+        color: isDark
+            ? const Color(0xFF2C2C2E).withOpacity(0.6)
+            : theme.colorScheme.surfaceContainerHighest.withOpacity(0.5),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: theme.colorScheme.outline.withOpacity(0.15),
+          color: isDark
+              ? const Color(0xFF38383A).withOpacity(0.4)
+              : theme.colorScheme.outline.withOpacity(0.15),
         ),
       ),
       child: Row(
@@ -1758,12 +1851,14 @@ class _FileAttachment extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-              color: theme.colorScheme.primaryContainer,
+              color: isDark
+                  ? const Color(0xFF2C2C2E)
+                  : theme.colorScheme.primaryContainer,
               borderRadius: BorderRadius.circular(10),
             ),
-            child: Icon(_fileIcon(), size: 24, color: theme.colorScheme.primary),
+            child: Icon(_fileIcon(), size: 24, color: fileIconColor),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1785,7 +1880,7 @@ class _FileAttachment extends StatelessWidget {
                     _formatSize(fileSize!),
                     style: TextStyle(
                       fontSize: 12,
-                      color: theme.colorScheme.outline,
+                      color: isDark ? const Color(0xFF8E8E93) : theme.colorScheme.outline,
                     ),
                   ),
                 ],
@@ -1793,7 +1888,7 @@ class _FileAttachment extends StatelessWidget {
             ),
           ),
           if (filePath != null) ...[
-            const SizedBox(width: 8),
+            const SizedBox(width: 6),
             IconButton(
               icon: const Icon(Icons.open_in_new, size: 20),
               onPressed: () async {
