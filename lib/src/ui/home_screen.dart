@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../main.dart';
 import '../localization/app_localizations.dart';
+import '../providers/persistent_store.dart';
 import 'chats_screen.dart';
 import 'debug_screen.dart';
 import 'profile_screen.dart';
@@ -16,14 +17,8 @@ class HomeScreen extends ConsumerStatefulWidget {
 }
 
 class _HomeScreenState extends ConsumerState<HomeScreen> {
-  int _currentIndex = 0;
   bool _coreInitializing = false;
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
-
-  static const _screens = [
-    ChatsScreen(),
-    ProfileScreen(),
-  ];
 
   @override
   void initState() {
@@ -49,18 +44,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     final loc = AppLocalizations.of(context);
+    final profileAsync = ref.watch(persistedProfileProvider);
 
     return Scaffold(
       key: _scaffoldKey,
-      drawer: _buildDrawer(context, loc),
+      drawer: _buildDrawer(context, loc, profileAsync),
       appBar: AppBar(
         title: const Text('TangleX Chat'),
-        leading: _currentIndex == 0
-            ? IconButton(
-                icon: const Icon(Icons.menu),
-                onPressed: () => _scaffoldKey.currentState?.openDrawer(),
-              )
-            : null,
+        leading: IconButton(
+          icon: const Icon(Icons.menu),
+          onPressed: () => _scaffoldKey.currentState?.openDrawer(),
+        ),
         actions: [
           IconButton(
             icon: const Icon(Icons.search),
@@ -70,31 +64,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           ),
         ],
       ),
-      body: IndexedStack(
-        index: _currentIndex,
-        children: _screens,
-      ),
-      floatingActionButton: _currentIndex == 0
-          ? FloatingActionButton(
-              onPressed: () => ref.read(fabActionProvider).trigger(),
-              child: const Icon(Icons.add),
-            )
-          : null,
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _currentIndex,
-        onDestinationSelected: (i) => setState(() => _currentIndex = i),
-        destinations: [
-          NavigationDestination(
-            icon: const Icon(Icons.chat_bubble_outline),
-            selectedIcon: const Icon(Icons.chat_bubble),
-            label: loc.translate('chats'),
-          ),
-          NavigationDestination(
-            icon: const Icon(Icons.person_outline),
-            selectedIcon: const Icon(Icons.person),
-            label: loc.translate('profile'),
-          ),
-        ],
+      body: const ChatsScreen(),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () => ref.read(fabActionProvider).trigger(),
+        child: const Icon(Icons.add),
       ),
     );
   }
@@ -113,39 +86,60 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
   }
 
-  Widget _buildDrawer(BuildContext context, AppLocalizations loc) {
+  void _openProfile(BuildContext context) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const ProfileScreen()),
+    );
+  }
+
+  Widget _buildDrawer(
+    BuildContext context,
+    AppLocalizations loc,
+    AsyncValue<ProfileData?> profileAsync,
+  ) {
     return Drawer(
       backgroundColor: const Color(0xFF000000),
       child: SafeArea(
         child: Column(
           children: [
-            DrawerHeader(
-              decoration: const BoxDecoration(
-                border: Border(
-                  bottom: BorderSide(color: Color(0xFF333333), width: 1),
-                ),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  const CircleAvatar(
-                    radius: 30,
-                    backgroundColor: Color(0xFF2A2A2A),
-                    child: Icon(Icons.person, size: 30, color: Color(0xFF808080)),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    loc.translate('profile'),
-                    style: const TextStyle(
-                      color: Color(0xFFE8E8E8),
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
+            // Profile header
+            InkWell(
+              onTap: () {
+                Navigator.pop(context);
+                _openProfile(context);
+              },
+              child: profileAsync.when(
+                loading: () => const Padding(
+                  padding: EdgeInsets.all(20),
+                  child: Center(
+                    child: SizedBox(
+                      width: 24,
+                      height: 24,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Color(0xFF5A9CF5),
+                      ),
                     ),
                   ),
-                ],
+                ),
+                error: (_, __) => _DrawerProfilePlaceholder(
+                  name: 'Error loading profile',
+                ),
+                data: (profile) {
+                  final dn = profile?.displayName ?? '';
+                  final ln = profile?.localDisplayName ?? '';
+                  final name = dn.isNotEmpty
+                      ? dn
+                      : ln.isNotEmpty
+                          ? ln
+                          : 'Profile';
+                  return _DrawerProfilePlaceholder(name: name);
+                },
               ),
             ),
+            const Divider(color: Color(0xFF333333), height: 1),
+            // Search
             ListTile(
               leading: const Icon(Icons.search, color: Color(0xFF808080)),
               title: Text(
@@ -157,6 +151,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 // TODO: open search
               },
             ),
+            // Settings
             ListTile(
               leading: const Icon(Icons.settings, color: Color(0xFF808080)),
               title: Text(
@@ -170,6 +165,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             ),
             const Spacer(),
             const Divider(color: Color(0xFF333333), height: 1),
+            // Debug
             ListTile(
               leading: const Icon(Icons.bug_report, color: Color(0xFF808080)),
               title: Text(
@@ -178,14 +174,62 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               ),
               onTap: () {
                 Navigator.pop(context);
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const DebugScreenWrapper()),
-                );
+                _openDebug(context);
               },
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _DrawerProfilePlaceholder extends StatelessWidget {
+  final String name;
+
+  const _DrawerProfilePlaceholder({required this.name});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      child: Row(
+        children: [
+          const CircleAvatar(
+            radius: 28,
+            backgroundColor: Color(0xFF2A2A2A),
+            child: Icon(Icons.person, size: 28, color: Color(0xFF808080)),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Color(0xFFE8E8E8),
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                const Text(
+                  'Tap to view profile',
+                  style: TextStyle(
+                    color: Color(0xFF808080),
+                    fontSize: 13,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const Icon(Icons.arrow_forward_ios, size: 14, color: Color(0xFF555555)),
+        ],
       ),
     );
   }
