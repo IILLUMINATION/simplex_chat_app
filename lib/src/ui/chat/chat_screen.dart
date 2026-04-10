@@ -1110,59 +1110,56 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                             ValueListenableBuilder<Iterable<ItemPosition>>(
                               valueListenable: _itemPositionsListener.itemPositions,
                               builder: (context, positions, _) {
-                                final showScrollDown = _shouldShowScrollToBottom(positions);
-                                return Column(
+                                return PinnedBar(
+                                  pinned: _pinStore.getPinned(widget.chatRef).reversed.toList(),
+                                  onPinTap: (pm, {onComplete}) => _scrollToMessage(pm.key, onComplete: onComplete),
+                                  onUnpin: (pm) { _pinStore.unpin(widget.chatRef, pm.key); setState(() {}); },
+                                  isPinVisible: (pm) => _isMessageVisible(pm.key, positions),
+                                );
+                              },
+                            ),
+                          Expanded(
+                            child: ValueListenableBuilder<Iterable<ItemPosition>>(
+                              valueListenable: _itemPositionsListener.itemPositions,
+                              builder: (context, positions, child) {
+                                return Stack(
                                   children: [
-                                    PinnedBar(
-                                      pinned: _pinStore.getPinned(widget.chatRef).reversed.toList(),
-                                      onPinTap: (pm, {onComplete}) => _scrollToMessage(pm.key, onComplete: onComplete),
-                                      onUnpin: (pm) { _pinStore.unpin(widget.chatRef, pm.key); setState(() {}); },
-                                      isPinVisible: (pm) => _isMessageVisible(pm.key, positions),
+                                    ScrollablePositionedList.builder(
+                                      itemScrollController: _itemScrollController,
+                                      itemPositionsListener: _itemPositionsListener,
+                                      reverse: true,
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                                      itemCount: displayEntries.length,
+                                      itemBuilder: (context, index) {
+                                        final entry = displayEntries[index];
+                                        switch (entry.type) {
+                                          case _DisplayEntryType.date:
+                                            return DateDivider(date: entry.date!);
+                                          case _DisplayEntryType.system:
+                                            return SystemBubble(text: entry.message!.text);
+                                          case _DisplayEntryType.group:
+                                          case _DisplayEntryType.message:
+                                            return _buildMessageBubble(entry.message!);
+                                        }
+                                      },
                                     ),
-                                    // Кнопка прокрутки вниз — внутри ValueListenableBuilder
-                                    // но над списком, с позиционированием через Stack
-                                    if (showScrollDown)
-                                      SizedBox(
-                                        height: 56,
-                                        child: Align(
-                                          alignment: Alignment.centerRight,
-                                          child: Padding(
-                                            padding: const EdgeInsets.only(right: 12),
-                                            child: FloatingActionButton(
-                                              mini: true,
-                                              backgroundColor: const Color(0xFF2A2D32),
-                                              elevation: 4,
-                                              onPressed: _scrollToBottom,
-                                              child: const Icon(Icons.arrow_downward, size: 20, color: Color(0xFF808080)),
-                                            ),
-                                          ),
+                                    if (_shouldShowScrollToBottom(positions))
+                                      Positioned(
+                                        right: 12,
+                                        bottom: 12,
+                                        child: FloatingActionButton(
+                                          mini: true,
+                                          backgroundColor: const Color(0xFF2A2D32),
+                                          elevation: 4,
+                                          onPressed: _scrollToBottom,
+                                          child: const Icon(Icons.arrow_downward, size: 20, color: Color(0xFF808080)),
                                         ),
                                       ),
                                   ],
                                 );
                               },
                             ),
-                          Expanded(
-                            child: ScrollablePositionedList.builder(
-                                  itemScrollController: _itemScrollController,
-                                  itemPositionsListener: _itemPositionsListener,
-                                  reverse: true,
-                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                                  itemCount: displayEntries.length,
-                                  itemBuilder: (context, index) {
-                                    final entry = displayEntries[index];
-                                    switch (entry.type) {
-                                      case _DisplayEntryType.date:
-                                        return DateDivider(date: entry.date!);
-                                      case _DisplayEntryType.system:
-                                        return SystemBubble(text: entry.message!.text);
-                                      case _DisplayEntryType.group:
-                                      case _DisplayEntryType.message:
-                                        return _buildMessageBubble(entry.message!);
-                                    }
-                                  },
-                                ),
-                            ),
+                          ),
                         ],
                       ),
           ),

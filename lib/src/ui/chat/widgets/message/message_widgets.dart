@@ -442,37 +442,23 @@ class MarkdownTextWidget extends StatelessWidget {
   Widget build(BuildContext context) {
     _registerLanguages();
     final theme = Theme.of(context);
-    final codeBg =
-        theme.brightness == Brightness.dark ? const Color(0xFF1E1E1E) : const Color(0xFFF5F5F5);
-    final baseStyle = theme.textTheme.bodyMedium?.copyWith(
-      color: textColor,
-      height: 1.35,
-      fontSize: 14.5,
-    );
+    final isDark = theme.brightness == Brightness.dark;
+    final codeBg = isDark ? const Color(0xFF181818) : const Color(0xFFF0F0F0);
+    final borderColor = isDark ? const Color(0xFF2A2A2A) : const Color(0xFFE0E0E0);
+    final linkColor = isDark ? const Color(0xFF6CB4EE) : const Color(0xFF2B7DE9);
+    final quoteBg = isDark ? const Color(0xFF1A1D23) : const Color(0xFFF5F7FA);
+    final quoteBorder = isDark ? const Color(0xFF4A6FA5) : const Color(0xFF5A9CF5);
+    final inlineCodeBg = isDark ? const Color(0xFF252526) : const Color(0xFFECECEC);
+    final hrColor = isDark ? const Color(0xFF2A2A2A) : const Color(0xFFE0E0E0);
+    final headingColor = isDark ? const Color(0xFFE8E8E8) : const Color(0xFF1A1A1A);
+    const baseFontSize = 14.0;
 
-    final langs = {
-      'dart': dart,
-      'python': python,
-      'py': python,
-      'javascript': javascript,
-      'js': javascript,
-      'typescript': typescript,
-      'ts': typescript,
-      'go': go,
-      'java': java,
-      'kotlin': kotlin,
-      'swift': swift,
-      'rust': rust,
-      'cpp': cpp,
-      'c++': cpp,
-      'c': cpp,
-      'bash': bash,
-      'sh': bash,
-      'shell': bash,
-    };
-    for (final entry in langs.entries) {
-      highlight.highlight.registerLanguage(entry.key, entry.value);
-    }
+    final baseStyle = TextStyle(
+      color: textColor,
+      height: 1.45,
+      fontSize: baseFontSize,
+      fontFamily: '.AppleSystemUIFont',
+    );
 
     return MarkdownBody(
       data: text,
@@ -488,36 +474,82 @@ class MarkdownTextWidget extends StatelessWidget {
       },
       styleSheet: MarkdownStyleSheet(
         p: baseStyle,
-        h1: baseStyle?.copyWith(fontSize: 22, fontWeight: FontWeight.w700),
-        h2: baseStyle?.copyWith(fontSize: 19, fontWeight: FontWeight.w700),
-        h3: baseStyle?.copyWith(fontSize: 17, fontWeight: FontWeight.w700),
-        strong: baseStyle?.copyWith(fontWeight: FontWeight.w700),
-        em: baseStyle?.copyWith(fontStyle: FontStyle.italic),
-        code: TextStyle(
-          backgroundColor: codeBg,
-          color: theme.colorScheme.onSurface,
-          fontFamily: 'monospace',
-          fontSize: theme.textTheme.bodyMedium?.fontSize,
+        h1: baseStyle.copyWith(
+          fontSize: 20,
+          fontWeight: FontWeight.w800,
+          height: 1.3,
+          color: headingColor,
+          letterSpacing: -0.3,
         ),
-        codeblockPadding: const EdgeInsets.all(12),
+        h2: baseStyle.copyWith(
+          fontSize: 17,
+          fontWeight: FontWeight.w700,
+          height: 1.35,
+          color: headingColor,
+          letterSpacing: -0.2,
+        ),
+        h3: baseStyle.copyWith(
+          fontSize: 15,
+          fontWeight: FontWeight.w600,
+          height: 1.4,
+          color: headingColor,
+        ),
+        h4: baseStyle.copyWith(
+          fontSize: 14,
+          fontWeight: FontWeight.w600,
+          height: 1.4,
+          color: headingColor,
+        ),
+        strong: baseStyle.copyWith(fontWeight: FontWeight.w700),
+        em: baseStyle.copyWith(fontStyle: FontStyle.italic),
+        del: baseStyle.copyWith(
+          color: textColor.withOpacity(0.5),
+          decoration: TextDecoration.lineThrough,
+        ),
+        code: TextStyle(
+          backgroundColor: inlineCodeBg,
+          color: isDark ? const Color(0xFFF08080) : const Color(0xFFD03050),
+          fontFamily: 'monospace',
+          fontSize: baseFontSize - 0.5,
+          fontWeight: FontWeight.w500,
+        ),
+        codeblockPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         codeblockDecoration: BoxDecoration(
           color: codeBg,
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: const Color(0xFF2A2A2A)),
+          border: Border.all(color: borderColor, width: 1),
         ),
-        blockquote: baseStyle?.copyWith(color: textColor.withOpacity(0.75)),
+        blockquote: baseStyle.copyWith(
+          color: textColor.withOpacity(0.7),
+          fontStyle: FontStyle.italic,
+        ),
+        blockquotePadding: const EdgeInsets.only(left: 12, right: 8, top: 4, bottom: 4),
         blockquoteDecoration: BoxDecoration(
-          color: const Color(0xFF1A1A1A),
-          border: Border(left: BorderSide(color: theme.colorScheme.outline, width: 3)),
+          color: quoteBg,
+          borderRadius: BorderRadius.circular(6),
+          border: Border(
+            left: BorderSide(color: quoteBorder, width: 3),
+          ),
         ),
-        listBullet: baseStyle,
+        listBullet: baseStyle.copyWith(
+          fontWeight: FontWeight.w700,
+          fontSize: baseFontSize + 2,
+        ),
+        listBulletPadding: const EdgeInsets.only(right: 6),
         horizontalRuleDecoration: BoxDecoration(
-          border: Border(top: BorderSide(color: theme.colorScheme.outline)),
+          border: Border(top: BorderSide(color: hrColor, width: 1)),
         ),
-        a: baseStyle?.copyWith(color: const Color(0xFF8AB4F8)),
+        a: baseStyle.copyWith(
+          color: linkColor,
+          decoration: TextDecoration.underline,
+          decorationColor: linkColor,
+        ),
+        tableBorder: TableBorder.all(color: borderColor, width: 1),
+        tableColumnWidth: const FlexColumnWidth(),
+        tableCellsPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       ),
       builders: {
-        'code': CodeBlockBuilder(codeBg, textColor, Theme.of(context)),
+        'code': CodeBlockBuilder(codeBg, textColor, theme),
       },
     );
   }
@@ -551,6 +583,7 @@ class CodeBlockBuilder extends MarkdownElementBuilder {
           language: language,
           textColor: textColor,
           codeBg: codeBg,
+          theme: theme,
         );
       } catch (_) {
         codeWidget = SimpleCodeBlock(
@@ -579,34 +612,80 @@ class HighlightedCodeBlock extends StatelessWidget {
   final String language;
   final Color textColor;
   final Color codeBg;
+  final ThemeData theme;
 
   const HighlightedCodeBlock({
     required this.text,
     required this.language,
     required this.textColor,
     required this.codeBg,
+    required this.theme,
   });
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final result = highlight.highlight.parse(text, language: language);
     final spans = _buildSpans(result?.nodes ?? [], theme);
+    final langLabel = language.toUpperCase();
     return Container(
-      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: codeBg,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: theme.brightness == Brightness.dark ? const Color(0xFF2A2A2A) : const Color(0xFFE0E0E0)),
       ),
-      child: SelectableText.rich(
-        TextSpan(children: spans, style: const TextStyle(fontFamily: 'monospace')),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            child: Text(
+              langLabel,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: textColor.withOpacity(0.45),
+                letterSpacing: 0.5,
+              ),
+            ),
+          ),
+          Container(
+            height: 1,
+            color: theme.brightness == Brightness.dark ? const Color(0xFF2A2A2A) : const Color(0xFFE0E0E0),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: SelectableText.rich(
+              TextSpan(
+                children: spans,
+                style: const TextStyle(
+                  fontFamily: 'monospace',
+                  fontSize: 13,
+                  height: 1.5,
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
 
   List<TextSpan> _buildSpans(List<highlight.Node> nodes, ThemeData theme) {
     final spans = <TextSpan>[];
-    final colorMap = _getCodeColors(theme: theme);
+    final isDark = theme.brightness == Brightness.dark;
+    final colorMap = <String, Color>{
+      'keyword': isDark ? const Color(0xFFC678DD) : const Color(0xFFA626A4),
+      'string': isDark ? const Color(0xFF98C379) : const Color(0xFF50A14F),
+      'number': isDark ? const Color(0xFFD19A66) : const Color(0xFF986801),
+      'comment': isDark ? const Color(0xFF5C6370) : const Color(0xFFA0A1A7),
+      'function': isDark ? const Color(0xFF61AFEF) : const Color(0xFF4078F2),
+      'class': isDark ? const Color(0xFFE5C07B) : const Color(0xFFC18401),
+      'built_in': isDark ? const Color(0xFF56B6C2) : const Color(0xFF0184BC),
+      'type': isDark ? const Color(0xFFE06C75) : const Color(0xFFE45649),
+      'operator': isDark ? const Color(0xFF56B6C2) : const Color(0xFF4078F2),
+      'param': isDark ? const Color(0xFFD19A66) : const Color(0xFF986801),
+      'property': isDark ? const Color(0xFFE06C75) : const Color(0xFFE45649),
+    };
     for (final node in nodes) {
       if (node.value != null) {
         spans.add(TextSpan(
@@ -623,19 +702,6 @@ class HighlightedCodeBlock extends StatelessWidget {
     }
     return spans;
   }
-
-  Map<String, Color> _getCodeColors({required ThemeData theme}) {
-    return {
-      'keyword': theme.colorScheme.primary,
-      'string': const Color(0xFF2E7D32),
-      'number': const Color(0xFF1565C0),
-      'comment': theme.colorScheme.outline,
-      'function': const Color(0xFF6A1B9A),
-      'class': const Color(0xFFE65100),
-      'built_in': theme.colorScheme.secondary,
-      'type': const Color(0xFF00838F),
-    };
-  }
 }
 
 class SimpleCodeBlock extends StatelessWidget {
@@ -651,19 +717,44 @@ class SimpleCodeBlock extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
-      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: codeBg,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: isDark ? const Color(0xFF2A2A2A) : const Color(0xFFE0E0E0)),
       ),
-      child: SelectableText(
-        text,
-        style: TextStyle(
-          fontFamily: 'monospace',
-          color: textColor,
-          fontSize: 13,
-        ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            child: Text(
+              'CODE',
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: textColor.withOpacity(0.45),
+                letterSpacing: 0.5,
+              ),
+            ),
+          ),
+          Container(
+            height: 1,
+            color: isDark ? const Color(0xFF2A2A2A) : const Color(0xFFE0E0E0),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: SelectableText(
+              text,
+              style: const TextStyle(
+                fontFamily: 'monospace',
+                fontSize: 13,
+                height: 1.5,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
