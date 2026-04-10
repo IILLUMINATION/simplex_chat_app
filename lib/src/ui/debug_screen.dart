@@ -55,10 +55,12 @@ class _DebugScreenWrapperState extends ConsumerState<DebugScreenWrapper> {
   Widget build(BuildContext context) {
     final loc = AppLocalizations.of(context);
     final service = ref.watch(tanglexServiceProvider);
+    final cs = Theme.of(context).colorScheme;
+    final isReady = service.isInitialized;
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Debug Console'),
+        title: Text(loc.translate('debug_console')),
       ),
       body: Padding(
         padding: const EdgeInsets.all(12),
@@ -69,36 +71,28 @@ class _DebugScreenWrapperState extends ConsumerState<DebugScreenWrapper> {
               width: double.infinity,
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: service.isInitialized
-                    ? Colors.green.shade50
-                    : Colors.orange.shade50,
+                color: isReady
+                    ? cs.primaryContainer.withOpacity(0.3)
+                    : cs.tertiaryContainer.withOpacity(0.3),
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(
-                  color: service.isInitialized
-                      ? Colors.green.shade200
-                      : Colors.orange.shade200,
+                  color: isReady ? cs.primaryContainer : cs.tertiaryContainer,
                 ),
               ),
               child: Row(
                 children: [
                   Icon(
-                    service.isInitialized
-                        ? Icons.check_circle
-                        : Icons.hourglass_top,
+                    isReady ? Icons.check_circle : Icons.hourglass_top,
                     size: 20,
-                    color: service.isInitialized
-                        ? Colors.green.shade700
-                        : Colors.orange.shade700,
+                    color: isReady ? cs.onPrimaryContainer : cs.onTertiaryContainer,
                   ),
                   const SizedBox(width: 8),
                   Text(
-                    service.isInitialized
-                        ? 'Core initialized'
-                        : 'Initializing...',
+                    isReady
+                        ? loc.translate('core_initialized')
+                        : loc.translate('initializing'),
                     style: TextStyle(
-                      color: service.isInitialized
-                          ? Colors.green.shade900
-                          : Colors.orange.shade900,
+                      color: isReady ? cs.onPrimaryContainer : cs.onTertiaryContainer,
                       fontWeight: FontWeight.w500,
                     ),
                   ),
@@ -136,7 +130,7 @@ class _DebugScreenWrapperState extends ConsumerState<DebugScreenWrapper> {
             Expanded(
               child: DecoratedBox(
                 decoration: BoxDecoration(
-                  border: Border.all(color: Colors.grey),
+                  border: Border.all(color: cs.outlineVariant),
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: ValueListenableBuilder<List<String>>(

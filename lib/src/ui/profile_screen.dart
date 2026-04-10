@@ -35,6 +35,17 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     });
   }
 
+  void _showSnackBar(String message, bool success) {
+    if (!mounted) return;
+    final cs = Theme.of(context).colorScheme;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: success ? cs.onInverseSurface : cs.error,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final loc = AppLocalizations.of(context);
@@ -64,14 +75,14 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 color: Theme.of(context).colorScheme.outline),
             const SizedBox(height: 16),
             Text(
-              'No profile yet',
+              loc.translate('no_profile_yet'),
               style: Theme.of(context).textTheme.titleLarge?.copyWith(
                     color: Theme.of(context).colorScheme.outline,
                   ),
             ),
             const SizedBox(height: 8),
             Text(
-              'Create a profile to start messaging',
+              loc.translate('create_profile_description'),
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                     color: Theme.of(context).colorScheme.outline,
                   ),
@@ -115,13 +126,11 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         _userData?['profile']?['shortDescr'] as String? ??
         '';
     final userId = profile?.userId ?? _userData?['userId'] as int?;
-    final activeUserId = _userData?['userId'] as int?;
 
     return RefreshIndicator(
       onRefresh: _loadUserData,
       child: ListView(
         children: [
-          // Profile header
           Container(
             padding: const EdgeInsets.all(24),
             child: Column(
@@ -170,21 +179,19 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           ),
           const Divider(),
 
-          // Details
           if (userId != null)
             ListTile(
               leading: const Icon(Icons.fingerprint),
-              title: const Text('User ID'),
+              title: Text(loc.translate('user_id')),
               subtitle: Text('$userId'),
             ),
 
           const Divider(),
 
-          // Actions
           ListTile(
             leading: const Icon(Icons.person_add),
-            title: const Text('Create new profile'),
-            subtitle: const Text('If you want a new profile, delete current first'),
+            title: Text(loc.translate('create_new_profile')),
+            subtitle: Text(loc.translate('create_new_profile_hint')),
             onTap: () async {
               await Navigator.push(
                 context,
@@ -202,24 +209,26 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           ),
           ListTile(
             leading: const Icon(Icons.refresh),
-            title: const Text('Refresh'),
+            title: Text(loc.translate('refresh')),
             onTap: _loadUserData,
           ),
           if (userId != null)
             ListTile(
               leading: const Icon(Icons.delete_outline),
-              title: const Text('Delete profile'),
-              subtitle: const Text('Removes active user from the core'),
+              title: Text(loc.translate('delete_profile')),
+              subtitle: Text(loc.translate('delete_profile_hint')),
               enabled: !_busy,
               onTap: _busy ? null : () => _confirmDelete(userId),
             ),
           if (_users.isNotEmpty) ...[
             const Divider(),
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               child: Text(
-                'Profiles',
-                style: TextStyle(fontWeight: FontWeight.bold),
+                loc.translate('profiles'),
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
               ),
             ),
             ..._users.map((entry) {
@@ -232,14 +241,14 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
               return ListTile(
                 leading: Icon(isActive ? Icons.check_circle : Icons.circle_outlined),
                 title: Text(name),
-                subtitle: Text('User ID: ${id ?? '-'}'),
+                subtitle: Text(loc.translate('user_id_value').replaceAll('%s', id?.toString() ?? '-')),
                 trailing: isActive
-                    ? const Text('Active')
+                    ? Text(loc.translate('active'))
                     : TextButton(
                         onPressed: (_busy || id == null)
                             ? null
                             : () => _switchUser(id),
-                        child: const Text('Activate'),
+                        child: Text(loc.translate('activate')),
                       ),
               );
             }),
@@ -250,22 +259,20 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   }
 
   Future<void> _confirmDelete(int userId) async {
+    final loc = AppLocalizations.of(context);
     final ok = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Delete profile?'),
-        content: const Text(
-          'This will delete the active user profile in the TangleX core. '
-          'You can create a new one after.',
-        ),
+        title: Text(loc.translate('delete_profile_confirm')),
+        content: Text(loc.translate('delete_profile_warning')),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
+            child: Text(loc.translate('cancel')),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Delete'),
+            child: Text(loc.translate('delete')),
           ),
         ],
       ),
@@ -285,19 +292,16 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       await _loadUserData();
     }
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            success ? 'Profile deleted' : 'Failed to delete profile',
-          ),
-          backgroundColor: success ? Colors.green : Colors.red,
-        ),
+      _showSnackBar(
+        success ? loc.translate('profile_deleted') : loc.translate('failed_delete_profile'),
+        success,
       );
     }
     setState(() => _busy = false);
   }
 
   Future<void> _switchUser(int userId) async {
+    final loc = AppLocalizations.of(context);
     setState(() => _busy = true);
     final service = ref.read(tanglexServiceProvider);
     final success = await service.setActiveUser(userId);
@@ -308,11 +312,9 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       }
     }
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(success ? 'Active profile updated' : 'Failed to switch profile'),
-          backgroundColor: success ? Colors.green : Colors.red,
-        ),
+      _showSnackBar(
+        success ? loc.translate('profile_updated') : loc.translate('failed_switch_profile'),
+        success,
       );
     }
     setState(() => _busy = false);

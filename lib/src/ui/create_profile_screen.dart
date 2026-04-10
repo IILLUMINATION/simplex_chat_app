@@ -22,9 +22,10 @@ class _CreateProfileScreenState extends ConsumerState<CreateProfileScreen> {
   String? _error;
 
   Future<void> _createProfile() async {
+    final loc = AppLocalizations.of(context);
     final displayName = _displayNameController.text.trim();
     if (displayName.isEmpty) {
-      setState(() => _error = 'Display name is required');
+      setState(() => _error = loc.translate('display_name_required'));
       return;
     }
 
@@ -64,6 +65,7 @@ class _CreateProfileScreenState extends ConsumerState<CreateProfileScreen> {
   @override
   Widget build(BuildContext context) {
     final loc = AppLocalizations.of(context);
+    final cs = Theme.of(context).colorScheme;
 
     return Scaffold(
       appBar: AppBar(
@@ -92,10 +94,10 @@ class _CreateProfileScreenState extends ConsumerState<CreateProfileScreen> {
             const SizedBox(height: 16),
             TextField(
               controller: _shortDescrController,
-              decoration: const InputDecoration(
-                labelText: 'О себе',
-                hintText: 'Пара слов о себе...',
-                border: OutlineInputBorder(),
+              decoration: InputDecoration(
+                labelText: loc.translate('bio'),
+                hintText: loc.translate('bio_hint'),
+                border: const OutlineInputBorder(),
               ),
               maxLength: 160,
               maxLines: 2,
@@ -107,13 +109,13 @@ class _CreateProfileScreenState extends ConsumerState<CreateProfileScreen> {
                 padding: const EdgeInsets.all(12),
                 margin: const EdgeInsets.only(bottom: 16),
                 decoration: BoxDecoration(
-                  color: Colors.red.shade50,
+                  color: cs.errorContainer.withOpacity(0.3),
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.red.shade200),
+                  border: Border.all(color: cs.errorContainer),
                 ),
                 child: SelectableText(
                   _error!,
-                  style: TextStyle(color: Colors.red.shade900, fontSize: 13),
+                  style: TextStyle(color: cs.onErrorContainer, fontSize: 13),
                 ),
               ),
             SizedBox(
@@ -136,17 +138,17 @@ class _CreateProfileScreenState extends ConsumerState<CreateProfileScreen> {
                 width: double.infinity,
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.green.shade50,
+                  color: cs.primaryContainer.withOpacity(0.3),
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.green.shade200),
+                  border: Border.all(color: cs.primaryContainer),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      '✓ Профиль создан',
+                      loc.translate('profile_created'),
                       style: TextStyle(
-                        color: Colors.green.shade900,
+                        color: cs.onPrimaryContainer,
                         fontWeight: FontWeight.bold,
                       ),
                     ),

@@ -5,7 +5,19 @@
       "Bash(flutter *)",
       "Bash(dart *)",
       "Bash(sleep *)",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(mkdir *)",
+      "Bash(mv *)",
+      "Bash(rm *)",
+      "Bash(grep *)",
+      "Bash(sed *)",
+      "Bash(do)",
+      "Bash(done)",
+      "Bash(ls *)",
+      "Bash(curl *)",
+      "Bash(git config *)"
     ]
   },
   "$version": 3

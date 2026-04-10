@@ -154,7 +154,7 @@ class _ChatsScreenState extends ConsumerState<ChatsScreen> {
         _profile = profile;
 
         if (!service.isInitialized) {
-          return _buildNotInitialized(service);
+          return _buildNotInitialized(loc, service);
         }
 
         if (_loading) {
@@ -172,8 +172,8 @@ class _ChatsScreenState extends ConsumerState<ChatsScreen> {
             children: [
               if (requests.isNotEmpty || pendingDirects.isNotEmpty) ...[
                 _SectionHeader(
-                  title: 'Requests',
-                  subtitle: 'Incoming contact requests',
+                  title: loc.translate('requests'),
+                  subtitle: loc.translate('incoming_contact_requests'),
                 ),
                 ...requests.map((req) => _RequestTile(
                       chat: req,
@@ -195,8 +195,8 @@ class _ChatsScreenState extends ConsumerState<ChatsScreen> {
               ],
               if (chats.isNotEmpty) ...[
                 _SectionHeader(
-                  title: 'Chats',
-                  subtitle: 'Your conversations',
+                  title: loc.translate('chats'),
+                  subtitle: loc.translate('your_conversations'),
                 ),
                 ...chats.where((c) =>
                         !(c.chatType == 'contact' &&
@@ -214,7 +214,7 @@ class _ChatsScreenState extends ConsumerState<ChatsScreen> {
     );
   }
 
-  Widget _buildNotInitialized(TanglexService service) {
+  Widget _buildNotInitialized(AppLocalizations loc, TanglexService service) {
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -223,7 +223,7 @@ class _ChatsScreenState extends ConsumerState<ChatsScreen> {
               color: Theme.of(context).colorScheme.outline),
           const SizedBox(height: 16),
           Text(
-            'Core not initialized',
+            loc.translate('core_not_initialized_chats'),
             style: Theme.of(context).textTheme.titleMedium?.copyWith(
                   color: Theme.of(context).colorScheme.outline,
                 ),
@@ -235,7 +235,7 @@ class _ChatsScreenState extends ConsumerState<ChatsScreen> {
               _loadChats();
             },
             icon: const Icon(Icons.play_arrow),
-            label: const Text('Initialize'),
+            label: Text(loc.translate('initialize')),
           ),
         ],
       ),
@@ -276,11 +276,12 @@ class _ChatsScreenState extends ConsumerState<ChatsScreen> {
   }
 
   void _openChat(BuildContext context, ChatPreview chat) {
+    final loc = AppLocalizations.of(context);
     if (chat.chatType != 'contact' && chat.chatType != 'group') {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('This chat is not ready yet'),
-          backgroundColor: Colors.orange,
+        SnackBar(
+          content: Text(loc.translate('chat_not_ready')),
+          backgroundColor: Theme.of(context).colorScheme.errorContainer,
         ),
       );
       return;
@@ -302,10 +303,12 @@ class _ChatsScreenState extends ConsumerState<ChatsScreen> {
     final service = ref.read(tanglexServiceProvider);
     final ok = await service.acceptContactRequest(reqId);
     if (mounted) {
+      final loc = AppLocalizations.of(context);
+      final cs = Theme.of(context).colorScheme;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(ok ? 'Request accepted' : 'Failed to accept request'),
-          backgroundColor: ok ? Colors.green : Colors.red,
+          content: Text(ok ? loc.translate('request_accepted') : loc.translate('failed_accept_request')),
+          backgroundColor: ok ? cs.onInverseSurface : cs.error,
         ),
       );
     }
@@ -321,10 +324,12 @@ class _ChatsScreenState extends ConsumerState<ChatsScreen> {
     final service = ref.read(tanglexServiceProvider);
     final ok = await service.rejectContactRequest(reqId);
     if (mounted) {
+      final loc = AppLocalizations.of(context);
+      final cs = Theme.of(context).colorScheme;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(ok ? 'Request rejected' : 'Failed to reject request'),
-          backgroundColor: ok ? Colors.green : Colors.red,
+          content: Text(ok ? loc.translate('request_rejected') : loc.translate('failed_reject_request')),
+          backgroundColor: ok ? cs.onInverseSurface : cs.error,
         ),
       );
     }
@@ -344,6 +349,7 @@ class _ChatTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final loc = AppLocalizations.of(context);
     final theme = Theme.of(context);
     final timeStr = chat.timestamp != null
         ? DateFormat.Hm().format(DateTime.fromMillisecondsSinceEpoch(chat.timestamp! ~/ 1000))
@@ -377,7 +383,7 @@ class _ChatTile extends StatelessWidget {
         overflow: TextOverflow.ellipsis,
       ),
       subtitle: Text(
-        chat.lastMessage.isNotEmpty ? chat.lastMessage : 'No messages yet',
+        chat.lastMessage.isNotEmpty ? chat.lastMessage : loc.translate('no_messages_yet'),
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
         style: theme.textTheme.bodyMedium?.copyWith(
@@ -418,10 +424,11 @@ class _RequestTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final loc = AppLocalizations.of(context);
     final theme = Theme.of(context);
     final title = chat.displayName.isNotEmpty
         ? chat.displayName
-        : (chat.localDisplayName.isNotEmpty ? chat.localDisplayName : 'Request');
+        : (chat.localDisplayName.isNotEmpty ? chat.localDisplayName : loc.translate('request'));
     final initials = _initials(title);
     final subtitle = [
       if (chat.fullName.isNotEmpty) chat.fullName,
@@ -461,7 +468,7 @@ class _RequestTile extends StatelessWidget {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    subtitle.isNotEmpty ? subtitle : 'Wants to connect with you',
+                    subtitle.isNotEmpty ? subtitle : loc.translate('wants_to_connect'),
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.colorScheme.onSecondaryContainer,
                     ),
@@ -472,12 +479,12 @@ class _RequestTile extends StatelessWidget {
             const SizedBox(width: 8),
             OutlinedButton(
               onPressed: onReject,
-              child: const Text('Reject'),
+              child: Text(loc.translate('reject')),
             ),
             const SizedBox(width: 6),
             FilledButton(
               onPressed: onAccept,
-              child: const Text('Accept'),
+              child: Text(loc.translate('accept')),
             ),
           ],
         ),
@@ -493,8 +500,9 @@ class _PendingTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final loc = AppLocalizations.of(context);
     final theme = Theme.of(context);
-    final title = chat.displayName.isNotEmpty ? chat.displayName : 'Pending';
+    final title = chat.displayName.isNotEmpty ? chat.displayName : loc.translate('pending');
     final initials = _initials(title);
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -517,7 +525,7 @@ class _PendingTile extends StatelessWidget {
         ),
         title: Text(title),
         subtitle: Text(
-          'Pending acceptance',
+          loc.translate('pending_acceptance'),
           style: theme.textTheme.bodySmall?.copyWith(
             color: theme.colorScheme.outline,
           ),

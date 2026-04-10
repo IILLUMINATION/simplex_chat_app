@@ -16,6 +16,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:just_audio/just_audio.dart';
 
 import '../../main.dart';
+import '../localization/app_localizations.dart';
 import '../service/tanglex_service.dart';
 import '../stickers/sticker_store.dart';
 
@@ -107,6 +108,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   }
 
   Future<void> _sendImages() async {
+    final loc = AppLocalizations.of(context);
     if (_sendingMedia) return;
     final picker = ImagePicker();
     final files = await picker.pickMultiImage(imageQuality: 90);
@@ -131,6 +133,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   }
 
   Future<void> _pickVideo() async {
+    final loc = AppLocalizations.of(context);
     if (_sendingMedia) return;
     final picker = ImagePicker();
     final file = await picker.pickVideo(source: ImageSource.gallery);
@@ -166,8 +169,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         SnackBar(
           content: Text(
             resultSend.error == null
-                ? 'Не удалось отправить видео'
-                : 'Не удалось отправить: ${resultSend.error}',
+                ? loc.translate('failed_send_video')
+                : loc.translate('failed_send_error').replaceAll('%s', resultSend.error ?? ''),
           ),
         ),
       );
@@ -176,6 +179,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   }
 
   Future<void> _pickFile({bool audioOnly = false}) async {
+    final loc = AppLocalizations.of(context);
     if (_sendingMedia) return;
     final res = await FilePicker.platform.pickFiles(
       type: audioOnly ? FileType.audio : FileType.any,
@@ -198,8 +202,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         SnackBar(
           content: Text(
             resultSend.error == null
-                ? 'Не удалось отправить файл'
-                : 'Не удалось отправить: ${resultSend.error}',
+                ? loc.translate('failed_send_file')
+                : loc.translate('failed_send_error').replaceAll('%s', resultSend.error ?? ''),
           ),
         ),
       );
@@ -208,6 +212,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   }
 
   Future<void> _sendSticker(StickerPack pack, StickerItem sticker) async {
+    final loc = AppLocalizations.of(context);
     if (_sendingMedia) return;
     setState(() => _sendingMedia = true);
     _PreviewPayload preview;
@@ -243,7 +248,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         SnackBar(
           content: Text(
             result.error == null
-                ? 'Не удалось отправить стикер'
+                ? loc.translate('failed_send_sticker')
                 : 'Не удалось отправить: ${result.error}',
           ),
         ),
@@ -289,6 +294,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   }
 
   Future<StickerPack?> _createStickerPack() async {
+    final loc = AppLocalizations.of(context);
     final nameCtrl = TextEditingController();
     final idCtrl = TextEditingController();
     final authorCtrl = TextEditingController();
@@ -297,13 +303,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       context: context,
       builder: (ctx) {
         return AlertDialog(
-          title: const Text('Новый стикер‑пак'),
+          title: Text(loc.translate('new_sticker_pack')),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               TextField(
                 controller: nameCtrl,
-                decoration: const InputDecoration(labelText: 'Название'),
+                decoration: InputDecoration(labelText: loc.translate('sticker_name')),
                 onChanged: (v) {
                   if (idCtrl.text.isEmpty) {
                     idCtrl.text = _slugify(v);
@@ -312,22 +318,22 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               ),
               TextField(
                 controller: idCtrl,
-                decoration: const InputDecoration(labelText: 'ID (латиница)'),
+                decoration: InputDecoration(labelText: loc.translate('sticker_id')),
               ),
               TextField(
                 controller: authorCtrl,
-                decoration: const InputDecoration(labelText: 'Автор (необяз.)'),
+                decoration: InputDecoration(labelText: loc.translate('sticker_author')),
               ),
             ],
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text('Отмена'),
+              child: Text(loc.translate('cancel')),
             ),
             TextButton(
               onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text('Далее'),
+              child: Text(loc.translate('sticker_next')),
             ),
           ],
         );
@@ -354,6 +360,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   }
 
   void _openAttachMenu() {
+    final loc = AppLocalizations.of(context);
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
@@ -364,7 +371,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             children: [
               ListTile(
                 leading: const Icon(Icons.photo),
-                title: const Text('Фото'),
+                title: Text(loc.translate('photo')),
                 onTap: () {
                   Navigator.of(ctx).pop();
                   _sendImages();
@@ -372,7 +379,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               ),
               ListTile(
                 leading: const Icon(Icons.videocam),
-                title: const Text('Видео'),
+                title: Text(loc.translate('video')),
                 onTap: () {
                   Navigator.of(ctx).pop();
                   _pickVideo();
@@ -380,7 +387,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               ),
               ListTile(
                 leading: const Icon(Icons.music_note),
-                title: const Text('Аудио'),
+                title: Text(loc.translate('audio')),
                 onTap: () {
                   Navigator.of(ctx).pop();
                   _pickFile(audioOnly: true);
@@ -388,7 +395,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               ),
               ListTile(
                 leading: const Icon(Icons.attach_file),
-                title: const Text('Файл'),
+                title: Text(loc.translate('file')),
                 onTap: () {
                   Navigator.of(ctx).pop();
                   _pickFile(audioOnly: false);
@@ -433,6 +440,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   }
 
   Future<void> _openCircleRecorder() async {
+    final loc = AppLocalizations.of(context);
     if (_sendingMedia) return;
     final result = await Navigator.of(context).push<_CircleVideoResult>(
       MaterialPageRoute(
@@ -457,8 +465,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         SnackBar(
           content: Text(
             resultSend.error == null
-                ? 'Не удалось отправить кружок'
-                : 'Не удалось отправить: ${resultSend.error}',
+                ? loc.translate('failed_send_circle')
+                : loc.translate('failed_send_error').replaceAll('%s', resultSend.error ?? ''),
           ),
         ),
       );
@@ -562,6 +570,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   }
 
   Future<void> _autoReceiveImages(List<_UiMessage> parsed) async {
+    final loc = AppLocalizations.of(context);
     if (!_autoDownloadEnabled || !_enableFileReceive) return;
     final service = ref.read(tanglexServiceProvider);
     bool anyAccepted = false;
@@ -592,14 +601,15 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   }
 
   Future<void> _requestFullImage(_UiImage image) async {
+    final loc = AppLocalizations.of(context);
     if (image.fileId == null) return;
     if (image.fileStatusType != 'rcvInvitation') return;
     if (!_enableFileReceive) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('HD download disabled (crash in native core).'),
-          backgroundColor: Colors.orange,
+        SnackBar(
+          content: Text(loc.translate('hd_download_tooltip')),
+          backgroundColor: Theme.of(context).colorScheme.tertiaryContainer,
         ),
       );
       return;
@@ -624,6 +634,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final loc = AppLocalizations.of(context);
     final theme = Theme.of(context);
     final initials = _initials(widget.chatName);
     final displayItems = _buildDisplayItems(_messages);
@@ -633,7 +644,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         titleSpacing: 0,
         actions: [
           IconButton(
-            tooltip: 'HD download',
+            tooltip: loc.translate('hd_download'),
             icon: Icon(
               _enableFileReceive ? Icons.cloud_download : Icons.cloud_off,
             ),
@@ -648,9 +659,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                             ? Icons.cloud_download
                             : Icons.cloud_off,
                       ),
-                      title: const Text('HD download (unstable)'),
-                      subtitle: const Text(
-                        'Включай только если нужно: может крэшить native core.',
+                      title: Text(loc.translate('hd_download_tooltip')),
+                      subtitle: Text(
+                        loc.translate('hd_download_warning'),
                       ),
                       onTap: () => Navigator.of(ctx).pop(!_enableFileReceive),
                     ),
@@ -724,7 +735,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                     : _messages.isEmpty
                         ? Center(
                             child: Text(
-                              'No messages yet',
+                              loc.translate('no_messages_yet'),
                               style:
                                   TextStyle(color: theme.colorScheme.outline),
                             ),
@@ -781,8 +792,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                     Expanded(
                       child: TextField(
                         controller: _msgController,
-                        decoration: const InputDecoration(
-                          hintText: 'Message...',
+                        decoration: InputDecoration(
+                          hintText: loc.translate('message_hint'),
                           border: InputBorder.none,
                         ),
                         maxLines: 4,
@@ -1145,6 +1156,7 @@ class _StickerPickerSheetState extends State<_StickerPickerSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final loc = AppLocalizations.of(context);
     final packs = widget.packs;
     final theme = Theme.of(context);
     return SafeArea(
@@ -1158,7 +1170,7 @@ class _StickerPickerSheetState extends State<_StickerPickerSheet> {
                 child: Column(
                   children: [
                     Text(
-                      'Стикеры не установлены',
+                      loc.translate('sticker_not_installed'),
                       style: theme.textTheme.titleMedium,
                     ),
                     const SizedBox(height: 8),
@@ -1168,13 +1180,13 @@ class _StickerPickerSheetState extends State<_StickerPickerSheet> {
                         ElevatedButton.icon(
                           onPressed: widget.onImport,
                           icon: const Icon(Icons.upload_file),
-                          label: const Text('Импортировать'),
+                          label: Text(loc.translate('import')),
                         ),
                         const SizedBox(width: 12),
                         OutlinedButton.icon(
                           onPressed: widget.onCreate,
                           icon: const Icon(Icons.add),
-                          label: const Text('Создать'),
+                          label: Text(loc.translate('create')),
                         ),
                       ],
                     ),
@@ -1573,9 +1585,10 @@ String _formatDuration(int seconds) {
 }
 
 void _openVideoPlayer(BuildContext context, _UiImage image) {
+  final loc = AppLocalizations.of(context);
   if (image.filePath == null) {
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Видео ещё не загружено.')),
+      SnackBar(content: Text(loc.translate('video_not_loaded'))),
     );
     return;
   }
@@ -2220,6 +2233,7 @@ class _CircleRecorderScreenState extends State<_CircleRecorderScreen> {
   }
 
   Future<void> _toggleRecording() async {
+    final loc = AppLocalizations.of(context);
     final ctrl = _controller;
     if (ctrl == null || _loading) return;
     if (_recording) {
@@ -2236,7 +2250,7 @@ class _CircleRecorderScreenState extends State<_CircleRecorderScreen> {
       if (!mounted) return;
       if (thumb == null) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Не удалось сделать превью')),
+          SnackBar(content: Text(loc.translate('preview_error'))),
         );
         return;
       }
@@ -2264,6 +2278,7 @@ class _CircleRecorderScreenState extends State<_CircleRecorderScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final loc = AppLocalizations.of(context);
     final theme = Theme.of(context);
     final previewSize = _controller?.value.previewSize;
     return Scaffold(
@@ -2271,7 +2286,7 @@ class _CircleRecorderScreenState extends State<_CircleRecorderScreen> {
       appBar: AppBar(
         backgroundColor: Colors.black,
         foregroundColor: Colors.white,
-        title: const Text('Кружок'),
+        title: Text(loc.translate('circle')),
         actions: [
           if (_recording)
             Padding(

@@ -62,7 +62,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           IconButton(
             icon: const Icon(Icons.bug_report),
             onPressed: () => _openDebug(context),
-            tooltip: 'Debug Console',
+            tooltip: loc.translate('debug_console'),
           ),
           IconButton(
             icon: const Icon(Icons.settings),
