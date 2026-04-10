@@ -17,7 +17,9 @@
       "Bash(done)",
       "Bash(ls *)",
       "Bash(curl *)",
-      "Bash(git config *)"
+      "Bash(git config *)",
+      "Bash(find *)",
+      "Bash(xargs *)"
     ]
   },
   "$version": 3
