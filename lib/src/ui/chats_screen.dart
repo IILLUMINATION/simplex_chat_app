@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
@@ -29,6 +30,8 @@ class _ChatsScreenState extends ConsumerState<ChatsScreen> {
   @override
   void initState() {
     super.initState();
+    // Register FAB handler
+    ref.read(fabActionProvider).setHandler(_openActionMenu);
     _loadChats();
     _loadRequests();
     _listenEvents();
@@ -36,6 +39,8 @@ class _ChatsScreenState extends ConsumerState<ChatsScreen> {
 
   @override
   void dispose() {
+    // Unregister FAB handler
+    ref.read(fabActionProvider).clearHandler();
     _eventSub?.cancel();
     _refreshDebounce?.cancel();
     super.dispose();
@@ -111,6 +116,125 @@ class _ChatsScreenState extends ConsumerState<ChatsScreen> {
         _loadChats();
       }
     });
+  }
+
+  void _openActionMenu() {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => _ActionMenuSheet(
+        onConnectViaLink: () {
+          Navigator.of(ctx).pop();
+          _showConnectDialog();
+        },
+        onCreateLink: () {
+          Navigator.of(ctx).pop();
+          _createAndShowLink();
+        },
+      ),
+    );
+  }
+
+  void _showConnectDialog() {
+    final controller = TextEditingController();
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(AppLocalizations.of(context).translate('connect_button')),
+        content: TextField(
+          controller: controller,
+          decoration: InputDecoration(
+            labelText: AppLocalizations.of(context).translate('connection_link_label'),
+            hintText: 'smp://...',
+            border: const OutlineInputBorder(),
+          ),
+          maxLines: 3,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(AppLocalizations.of(context).translate('cancel')),
+          ),
+          FilledButton(
+            onPressed: () async {
+              final link = controller.text.trim();
+              if (link.isEmpty) return;
+              final service = ref.read(tanglexServiceProvider);
+              final ok = await service.connectViaLink(link);
+              if (mounted) {
+                Navigator.pop(ctx);
+                final cs = Theme.of(context).colorScheme;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      ok
+                          ? AppLocalizations.of(context).translate('connection_request_sent')
+                          : AppLocalizations.of(context).translate('failed_connect'),
+                    ),
+                    backgroundColor: ok ? cs.onInverseSurface : cs.error,
+                  ),
+                );
+                if (ok) await _loadChats();
+              }
+            },
+            child: Text(AppLocalizations.of(context).translate('connect_button')),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _createAndShowLink() async {
+    final service = ref.read(tanglexServiceProvider);
+    if (!service.isInitialized) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(AppLocalizations.of(context).translate('core_not_initialized_yet')),
+          backgroundColor: Theme.of(context).colorScheme.tertiaryContainer,
+        ),
+      );
+      return;
+    }
+    final loc = AppLocalizations.of(context);
+    final link = await service.createConnectionLink();
+    if (!mounted) return;
+    if (link == null) {
+      // Might already exist — try to fetch it
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(loc.translate('failed_create_link')),
+          backgroundColor: Theme.of(context).colorScheme.error,
+        ),
+      );
+      return;
+    }
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(loc.translate('your_link')),
+        content: SelectableText(
+          link,
+          style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(loc.translate('cancel')),
+          ),
+          TextButton(
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: link));
+              Navigator.pop(ctx);
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text(loc.translate('link_copied'))),
+              );
+            },
+            child: Text(loc.translate('copy')),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -343,6 +467,39 @@ class _ChatsScreenState extends ConsumerState<ChatsScreen> {
           _requests.removeWhere((r) => r.contactRequestId == reqId));
     }
     await _loadChats();
+  }
+}
+
+/// FAB action sheet
+class _ActionMenuSheet extends StatelessWidget {
+  final VoidCallback onConnectViaLink;
+  final VoidCallback onCreateLink;
+
+  const _ActionMenuSheet({
+    required this.onConnectViaLink,
+    required this.onCreateLink,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final loc = AppLocalizations.of(context);
+    return SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ListTile(
+            leading: const Icon(Icons.qr_code_scanner),
+            title: Text(loc.translate('connect_by_link')),
+            onTap: onConnectViaLink,
+          ),
+          ListTile(
+            leading: const Icon(Icons.share),
+            title: Text(loc.translate('create_my_link')),
+            onTap: onCreateLink,
+          ),
+        ],
+      ),
+    );
   }
 }
 

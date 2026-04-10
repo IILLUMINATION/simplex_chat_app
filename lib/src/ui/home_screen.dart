@@ -4,7 +4,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../main.dart';
 import '../localization/app_localizations.dart';
 import 'chats_screen.dart';
-import 'connect_screen.dart';
 import 'debug_screen.dart';
 import 'profile_screen.dart';
 import 'settings_screen.dart';
@@ -22,7 +21,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   static const _screens = [
     ChatsScreen(),
-    ConnectScreen(),
     ProfileScreen(),
   ];
 
@@ -55,7 +53,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       appBar: AppBar(
         title: Text([
           loc.translate('chats'),
-          loc.translate('connect'),
           loc.translate('profile'),
         ][_currentIndex]),
         actions: [
@@ -75,6 +72,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         index: _currentIndex,
         children: _screens,
       ),
+      floatingActionButton: _currentIndex == 0
+          ? FloatingActionButton(
+              onPressed: () => ref.read(fabActionProvider).trigger(),
+              child: const Icon(Icons.add),
+            )
+          : null,
       bottomNavigationBar: NavigationBar(
         selectedIndex: _currentIndex,
         onDestinationSelected: (i) => setState(() => _currentIndex = i),
@@ -83,11 +86,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             icon: const Icon(Icons.chat_bubble_outline),
             selectedIcon: const Icon(Icons.chat_bubble),
             label: loc.translate('chats'),
-          ),
-          NavigationDestination(
-            icon: const Icon(Icons.link),
-            selectedIcon: const Icon(Icons.link_off),
-            label: loc.translate('connect'),
           ),
           NavigationDestination(
             icon: const Icon(Icons.person_outline),

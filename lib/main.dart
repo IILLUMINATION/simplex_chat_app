@@ -15,6 +15,29 @@ final tanglexServiceProvider = Provider<TanglexService>((ref) {
   return service;
 });
 
+// Global notifier to trigger the FAB action from HomeScreen -> ChatsScreen
+class _FabActionNotifier extends ChangeNotifier {
+  VoidCallback? _handler;
+
+  void setHandler(VoidCallback handler) {
+    _handler = handler;
+  }
+
+  void clearHandler() {
+    _handler = null;
+  }
+
+  void trigger() {
+    _handler?.call();
+  }
+}
+
+final fabActionProvider = ChangeNotifierProvider<_FabActionNotifier>((ref) {
+  final notifier = _FabActionNotifier();
+  ref.onDispose(() => notifier.dispose());
+  return notifier;
+});
+
 void main() {
   runApp(const ProviderScope(child: TangleXApp()));
 }
