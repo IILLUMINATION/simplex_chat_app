@@ -19,7 +19,13 @@
       "Bash(curl *)",
       "Bash(git config *)",
       "Bash(find *)",
-      "Bash(xargs *)"
+      "Bash(xargs *)",
+      "Bash(file *)",
+      "Bash(xxd *)",
+      "Bash(cat *)",
+      "Bash(which *)",
+      "Bash(pacman *)",
+      "Bash(git *)"
     ]
   },
   "$version": 3

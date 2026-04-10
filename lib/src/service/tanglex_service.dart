@@ -732,12 +732,20 @@ class TanglexService {
           final retryJson = Map<String, dynamic>.from(_decodeJson(retry));
           if (retryJson.containsKey('error')) return false;
           final retryResult = retryJson['result'] as Map<String, dynamic>?;
-          return retryResult != null && retryResult['type'] == 'cmdOk';
+          if (retryResult != null && retryResult['type'] == 'cmdOk') {
+            if (_activeUserId == userId) _activeUserId = null;
+            return true;
+          }
+          return false;
         }
         return false;
       }
       final result = json['result'] as Map<String, dynamic>?;
-      return result != null && result['type'] == 'cmdOk';
+      if (result != null && result['type'] == 'cmdOk') {
+        if (_activeUserId == userId) _activeUserId = null;
+        return true;
+      }
+      return false;
     } catch (_) {
       return false;
     }

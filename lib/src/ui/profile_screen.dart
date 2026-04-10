@@ -29,6 +29,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     if (!service.isInitialized) return;
     final user = await service.getUser();
     final users = await service.getUsers();
+    if (!mounted) return;
     setState(() {
       _userData = user;
       _users = users;
@@ -283,12 +284,12 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     setState(() => _busy = true);
     final service = ref.read(tanglexServiceProvider);
     final success = await service.deleteUser(userId);
-    if (success) {
+    if (success && mounted) {
       await clearProfileData();
+      // Reload user data to reflect deletion — getUser() will return null
+      // or switch to another user if one exists
       _userData = null;
-      if (mounted) {
-        ref.invalidate(persistedProfileProvider);
-      }
+      _users = [];
       await _loadUserData();
     }
     if (mounted) {
@@ -305,11 +306,27 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     setState(() => _busy = true);
     final service = ref.read(tanglexServiceProvider);
     final success = await service.setActiveUser(userId);
-    if (success) {
-      await _loadUserData();
-      if (mounted) {
+    if (success && mounted) {
+      // Update local cache to match the newly active user
+      final newUser = await service.getUser();
+      if (mounted && newUser != null) {
+        _userData = newUser;
+        final displayName = newUser['localDisplayName'] as String? ?? '';
+        final fullName = newUser['profile']?['fullName'] as String? ?? '';
+        final shortDescr = newUser['profile']?['shortDescr'] as String? ?? '';
+        await saveProfileData(ProfileData(
+          displayName: displayName,
+          fullName: fullName,
+          shortDescr: shortDescr,
+          userId: newUser['userId'] as int?,
+          agentUserId: newUser['agentUserId'] as String?,
+          userContactId: newUser['userContactId'] as int?,
+          localDisplayName: newUser['localDisplayName'] as String?,
+        ));
         ref.invalidate(persistedProfileProvider);
       }
+      // Also refresh the users list
+      await _loadUserData();
     }
     if (mounted) {
       _showSnackBar(
