@@ -38,6 +38,7 @@ class MessageBubble extends StatelessWidget {
   final AudioNowPlaying? nowPlaying;
   final void Function(LongPressStartDetails, BuildContext)? onLongPress;
   final VoidCallback? onSwipeReply;
+  final VoidCallback? onQuotedTap;
 
   const MessageBubble({
     required this.message,
@@ -51,6 +52,7 @@ class MessageBubble extends StatelessWidget {
     required this.nowPlaying,
     this.onLongPress,
     this.onSwipeReply,
+    this.onQuotedTap,
   });
 
   @override
@@ -165,57 +167,60 @@ class MessageBubble extends StatelessWidget {
                 if (text.isNotEmpty) const SizedBox(height: 6),
               ],
               if (message.quoted != null) ...[
-                Container(
-                  margin: const EdgeInsets.only(bottom: 6),
-                  padding: const EdgeInsets.fromLTRB(10, 7, 10, 7),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF303030),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(
-                      color: const Color(0xFF3A3A3A),
-                      width: 1,
+                GestureDetector(
+                  onTap: message.quoted!.itemId != null ? onQuotedTap : null,
+                  child: Container(
+                    margin: const EdgeInsets.only(bottom: 6),
+                    padding: const EdgeInsets.fromLTRB(10, 7, 10, 7),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF303030),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: const Color(0xFF3A3A3A),
+                        width: 1,
+                      ),
                     ),
-                  ),
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 3,
-                        height: 28,
-                        margin: const EdgeInsets.only(right: 8),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF5A9CF5),
-                          borderRadius: BorderRadius.circular(2),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 3,
+                          height: 28,
+                          margin: const EdgeInsets.only(right: 8),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF5A9CF5),
+                            borderRadius: BorderRadius.circular(2),
+                          ),
                         ),
-                      ),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              message.quoted!.senderName.isNotEmpty
-                                  ? message.quoted!.senderName
-                                  : (fromMe ? 'Вы' : ''),
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                                color: const Color(0xFF5A9CF5),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                message.quoted!.senderName.isNotEmpty
+                                    ? message.quoted!.senderName
+                                    : (fromMe ? 'Вы' : ''),
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  color: const Color(0xFF5A9CF5),
+                                ),
                               ),
-                            ),
-                            const SizedBox(height: 1),
-                            Text(
-                              message.quoted!.text,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontSize: 13,
-                                color: textPrimary,
+                              const SizedBox(height: 1),
+                              Text(
+                                message.quoted!.text,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: textPrimary,
+                                ),
                               ),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
               ],

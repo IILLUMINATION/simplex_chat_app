@@ -22,8 +22,9 @@ UiMessage? parseChatItem(Map<String, dynamic> msg, {String? filesBaseDir}) {
   final quotedContent = quotedItem?['content'] as Map<String, dynamic>?;
   final quotedText = quotedContent?['text'] as String?;
   final quotedSender = quotedItem?['senderName'] as String?;
+  final quotedItemId = quotedItem?['itemId'] as int?;
   final quoted = (quotedText?.isNotEmpty == true)
-      ? QuotedMessage(text: quotedText!, senderName: quotedSender ?? '')
+      ? QuotedMessage(text: quotedText!, senderName: quotedSender ?? '', itemId: quotedItemId)
       : null;
   final msgKey = '${dirType}_${tsStr ?? ''}_${itemText ?? ''}';
   String timeStr = '';

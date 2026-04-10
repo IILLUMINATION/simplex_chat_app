@@ -836,6 +836,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         }
         setState(() => _replyTo = m);
       },
+      onQuotedTap: () {
+        final quotedKey = m.quoted?.itemId;
+        if (quotedKey != null) {
+          // Ищем сообщение по itemId и прокручиваем к нему
+          _scrollToMessageByItemId(quotedKey);
+        }
+      },
     );
   }
 
@@ -862,6 +869,28 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       alignment: 0.2,
     );
     onComplete?.call();
+  }
+
+  void _scrollToMessageByItemId(int itemId) {
+    // Ищем сообщение с нужным itemId в _messages
+    final idx = _messages.indexWhere((m) => m.itemId == itemId);
+    if (idx == -1) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Сообщение не найдено')));
+      return;
+    }
+    final target = _messages[idx];
+    final displayIdx = _displayIndexByKey[target.key];
+    if (displayIdx == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Сообщение не найдено')));
+      return;
+    }
+    if (!_itemScrollController.isAttached) return;
+    _itemScrollController.scrollTo(
+      index: displayIdx,
+      duration: const Duration(milliseconds: 400),
+      curve: Curves.easeInOut,
+      alignment: 0.2,
+    );
   }
 
   bool _isMessageVisible(String msgKey, Iterable<ItemPosition> positions) {
@@ -1172,65 +1201,67 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   if (_replyTo != null)
-                    Container(
-                      margin: const EdgeInsets.only(bottom: 6),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF303030),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                          color: const Color(0xFF3A3A3A),
-                          width: 1,
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 320),
+                      child: Container(
+                        margin: const EdgeInsets.only(bottom: 6),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF303030),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: const Color(0xFF3A3A3A),
+                            width: 1,
+                          ),
                         ),
-                      ),
-                      child: Row(
-                        children: [
-                          Container(
-                            width: 4,
-                            height: 40,
-                            margin: const EdgeInsets.only(left: 0, right: 10),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF5A9CF5),
-                              borderRadius: const BorderRadius.horizontal(
-                                left: Radius.circular(11),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(
+                              width: 4,
+                              height: 32,
+                              margin: const EdgeInsets.only(left: 8, right: 8),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF5A9CF5),
+                                borderRadius: BorderRadius.circular(2),
                               ),
                             ),
-                          ),
-                          Expanded(
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 8),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Text(
-                                    _replyTo!.fromMe ? 'Вы' : widget.chatName,
-                                    style: const TextStyle(
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w600,
-                                      color: Color(0xFF5A9CF5),
+                            Flexible(
+                              child: Padding(
+                                padding: const EdgeInsets.fromLTRB(4, 6, 4, 6),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      _replyTo!.fromMe ? 'Вы' : widget.chatName,
+                                      style: const TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                        color: Color(0xFF5A9CF5),
+                                      ),
                                     ),
-                                  ),
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    _replyTo!.text.split('\n').first,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                      color: textPrimary,
-                                      fontSize: 13,
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      _replyTo!.text.split('\n').first,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        color: textPrimary,
+                                        fontSize: 13,
+                                      ),
                                     ),
-                                  ),
-                                ],
+                                  ],
+                                ),
                               ),
                             ),
-                          ),
-                          IconButton(
-                            onPressed: () => setState(() => _replyTo = null),
-                            icon: Icon(Icons.close, size: 18, color: textSecondary),
-                            padding: const EdgeInsets.all(8),
-                            constraints: const BoxConstraints(),
-                          ),
-                        ],
+                            IconButton(
+                              onPressed: () => setState(() => _replyTo = null),
+                              icon: Icon(Icons.close, size: 18, color: textSecondary),
+                              padding: const EdgeInsets.all(6),
+                              constraints: const BoxConstraints(),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   Row(
@@ -1288,24 +1319,27 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                           if (hasText) {
                             return const SizedBox.shrink();
                           }
-                          return GestureDetector(
-                            onTap: () => setState(() => _circleMode = !_circleMode),
-                            onLongPress: _sendingMedia
-                                ? null
-                                : () {
-                                    if (_circleMode) {
-                                      _openCircleRecorder();
-                                    } else {
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        const SnackBar(content: Text('Голосовые пока недоступны')),
-                                      );
-                                    }
-                                  },
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                              child: Icon(
-                                _circleMode ? Icons.radio_button_checked : Icons.mic,
-                                color: textSecondary,
+                          return Center(
+                            child: GestureDetector(
+                              onTap: () => setState(() => _circleMode = !_circleMode),
+                              onLongPress: _sendingMedia
+                                  ? null
+                                  : () {
+                                      if (_circleMode) {
+                                        _openCircleRecorder();
+                                      } else {
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          const SnackBar(content: Text('Голосовые пока недоступны')),
+                                        );
+                                      }
+                                    },
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+                                child: Icon(
+                                  _circleMode ? Icons.radio_button_checked : Icons.mic,
+                                  color: textSecondary,
+                                  size: 24,
+                                ),
                               ),
                             ),
                           );

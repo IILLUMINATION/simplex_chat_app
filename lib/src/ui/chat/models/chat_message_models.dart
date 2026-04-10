@@ -107,8 +107,9 @@ class AudioNowPlaying {
 class QuotedMessage {
   final String text;
   final String senderName;
+  final int? itemId;
 
-  const QuotedMessage({required this.text, this.senderName = ''});
+  const QuotedMessage({required this.text, this.senderName = '', this.itemId});
 }
 
 class PreviewPayload {
