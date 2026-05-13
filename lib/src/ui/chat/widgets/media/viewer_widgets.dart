@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -7,10 +6,9 @@ import 'package:image_gallery_saver/image_gallery_saver.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:video_player/video_player.dart';
-import 'package:video_thumbnail/video_thumbnail.dart' as vthumb;
 
 import '../../models/chat_message_models.dart';
-import 'media_widgets.dart' show thumbCache, thumbInProgress, generateVideoThumb;
+import 'media_widgets.dart' show thumbCache, generateVideoThumb;
 
 class GalleryView extends StatefulWidget {
   final List<UiImage> images;
@@ -60,7 +58,8 @@ class _GalleryViewState extends State<GalleryView> {
           }
           return Image.memory(
             data,
-            errorBuilder: (_, __, ___) => const ColoredBox(color: Colors.black12),
+            errorBuilder: (_, __, ___) =>
+                const ColoredBox(color: Colors.black12),
           );
         },
       );
@@ -97,9 +96,7 @@ class _GalleryViewState extends State<GalleryView> {
         onPageChanged: (idx) => setState(() => _currentIndex = idx),
         itemBuilder: (context, index) {
           final img = widget.images[index];
-          return InteractiveViewer(
-            child: Center(child: _galleryImage(img)),
-          );
+          return InteractiveViewer(child: Center(child: _galleryImage(img)));
         },
       ),
     );
@@ -116,7 +113,10 @@ class _GalleryViewState extends State<GalleryView> {
             children: [
               ListTile(
                 leading: const Icon(Icons.download, color: Colors.white),
-                title: Text('Сохранить в галерею', style: const TextStyle(color: Colors.white)),
+                title: Text(
+                  'Сохранить в галерею',
+                  style: const TextStyle(color: Colors.white),
+                ),
                 onTap: () async {
                   Navigator.of(ctx).pop();
                   await _saveToGallery(img);
@@ -124,7 +124,10 @@ class _GalleryViewState extends State<GalleryView> {
               ),
               ListTile(
                 leading: const Icon(Icons.share, color: Colors.white),
-                title: Text('Поделиться', style: const TextStyle(color: Colors.white)),
+                title: Text(
+                  'Поделиться',
+                  style: const TextStyle(color: Colors.white),
+                ),
                 onTap: () async {
                   Navigator.of(ctx).pop();
                   await _shareImage(img);
@@ -132,7 +135,10 @@ class _GalleryViewState extends State<GalleryView> {
               ),
               ListTile(
                 leading: const Icon(Icons.copy, color: Colors.white),
-                title: Text('Скопировать путь', style: const TextStyle(color: Colors.white)),
+                title: Text(
+                  'Скопировать путь',
+                  style: const TextStyle(color: Colors.white),
+                ),
                 onTap: () async {
                   Navigator.of(ctx).pop();
                   await _copyPath(img);
@@ -155,21 +161,23 @@ class _GalleryViewState extends State<GalleryView> {
         return;
       }
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Сохранено в галерею')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Сохранено в галерею')));
       }
     } on MissingPluginException {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Сохранение недоступно. Перезапусти приложение.')),
+          const SnackBar(
+            content: Text('Сохранение недоступно. Перезапусти приложение.'),
+          ),
         );
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Не удалось сохранить: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Не удалось сохранить: $e')));
       }
     }
   }
@@ -182,15 +190,17 @@ class _GalleryViewState extends State<GalleryView> {
       }
       if (img.bytes != null) {
         final dir = await getTemporaryDirectory();
-        final f = File('${dir.path}/share_${DateTime.now().millisecondsSinceEpoch}.jpg');
+        final f = File(
+          '${dir.path}/share_${DateTime.now().millisecondsSinceEpoch}.jpg',
+        );
         await f.writeAsBytes(img.bytes!, flush: true);
         await Share.shareXFiles([XFile(f.path)]);
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Не удалось поделиться: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Не удалось поделиться: $e')));
       }
     }
   }
@@ -199,9 +209,9 @@ class _GalleryViewState extends State<GalleryView> {
     if (img.filePath == null || img.filePath!.isEmpty) return;
     await Clipboard.setData(ClipboardData(text: img.filePath!));
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Путь скопирован')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Путь скопирован')));
     }
   }
 }

@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:typed_data';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
@@ -100,9 +99,9 @@ class _CircleRecorderScreenState extends State<CircleRecorderScreen> {
       })();
       if (!mounted) return;
       if (thumb == null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(loc.translate('preview_error'))),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(loc.translate('preview_error'))));
         return;
       }
       final previewBytes = prepareCirclePreview(thumb);

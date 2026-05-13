@@ -209,7 +209,7 @@ class VideoThumbRect extends StatelessWidget {
           if (image.bytes != null)
             Image.memory(image.bytes!, fit: BoxFit.cover)
           else if (image.filePath != null)
-            Image.file(File(image.filePath!), fit: BoxFit.cover)
+            _VideoThumb(filePath: image.filePath!)
           else
             const ColoredBox(color: Colors.black38),
           Container(color: Colors.black26),
@@ -567,6 +567,61 @@ class _StickerThumbState extends State<StickerThumb> {
   }
 }
 
+class _VideoThumb extends StatefulWidget {
+  final String filePath;
+
+  const _VideoThumb({required this.filePath});
+
+  @override
+  State<_VideoThumb> createState() => _VideoThumbState();
+}
+
+class _VideoThumbState extends State<_VideoThumb> {
+  Future<Uint8List?>? _future;
+
+  @override
+  void initState() {
+    super.initState();
+    _initFuture();
+  }
+
+  @override
+  void didUpdateWidget(_VideoThumb oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.filePath != widget.filePath) _initFuture();
+  }
+
+  void _initFuture() {
+    _future = generateVideoThumb(widget.filePath, 320, 75);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cached = thumbCache[widget.filePath];
+    if (cached != null) {
+      return Image.memory(
+        cached,
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => const ColoredBox(color: Colors.black12),
+      );
+    }
+    return FutureBuilder<Uint8List?>(
+      future: _future,
+      builder: (context, snap) {
+        final data = snap.data;
+        if (data != null) {
+          return Image.memory(
+            data,
+            fit: BoxFit.cover,
+            errorBuilder: (_, __, ___) => const ColoredBox(color: Colors.black12),
+          );
+        }
+        return const ColoredBox(color: Colors.black38);
+      },
+    );
+  }
+}
+
 class StickerWebm extends StatefulWidget {
   final String filePath;
 
@@ -578,17 +633,26 @@ class StickerWebm extends StatefulWidget {
 
 class _StickerWebmState extends State<StickerWebm> {
   Future<Uint8List?>? _future;
+  VideoPlayerController? _controller;
+  bool _ready = false;
+  bool _failed = false;
+  VoidCallback? _loopListener;
 
   @override
   void initState() {
     super.initState();
     _initFuture();
+    _initController();
   }
 
   @override
   void didUpdateWidget(StickerWebm oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.filePath != widget.filePath) _initFuture();
+    if (oldWidget.filePath != widget.filePath) {
+      _initFuture();
+      _disposeController();
+      _initController();
+    }
   }
 
   void _initFuture() {
@@ -601,8 +665,68 @@ class _StickerWebmState extends State<StickerWebm> {
     });
   }
 
+  Future<void> _initController() async {
+    final file = File(widget.filePath);
+    if (!file.existsSync()) return;
+    final controller = VideoPlayerController.file(file);
+    _controller = controller;
+    try {
+      await controller.initialize();
+      await controller.setLooping(true);
+      await controller.setVolume(0);
+      await controller.play();
+      _loopListener = () {
+        final c = _controller;
+        if (c == null || !c.value.isInitialized) return;
+        final v = c.value;
+        if (!v.isPlaying &&
+            v.duration.inMilliseconds > 0 &&
+            v.position.inMilliseconds >=
+                v.duration.inMilliseconds - 60) {
+          c.seekTo(Duration.zero);
+          c.play();
+        }
+      };
+      controller.addListener(_loopListener!);
+      if (mounted) setState(() => _ready = true);
+    } catch (_) {
+      if (mounted) setState(() => _failed = true);
+    }
+  }
+
+  void _disposeController() {
+    if (_loopListener != null) {
+      _controller?.removeListener(_loopListener!);
+      _loopListener = null;
+    }
+    _controller?.dispose();
+    _controller = null;
+    _ready = false;
+    _failed = false;
+  }
+
+  @override
+  void dispose() {
+    _disposeController();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
+    if (_ready && _controller != null) {
+      final size = _controller!.value.size;
+      return FittedBox(
+        fit: BoxFit.contain,
+        child: SizedBox(
+          width: size.width,
+          height: size.height,
+          child: VideoPlayer(_controller!),
+        ),
+      );
+    }
+    if (_failed) {
+      return const ColoredBox(color: Colors.black12);
+    }
     final cached = _thumbCache[widget.filePath];
     if (cached != null) {
       return Image.memory(

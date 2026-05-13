@@ -1,25 +1,50 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 import 'dart:ui';
 
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:record/record.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
+import 'package:video_player/video_player.dart';
+import 'package:video_thumbnail/video_thumbnail.dart' as vthumb;
 
 import '../../../main.dart';
 import '../../data/pin_store.dart';
 import '../../localization/app_localizations.dart';
-import '../../service/tanglex_service.dart' show TanglexService, ImagePayload;
-import '../../stickers/sticker_store.dart' show StickerStore, StickerPack, StickerItem;
+import '../../service/tanglex_service.dart' show ImagePayload;
+import 'utils/chat_message_parser.dart'
+    show prepareStickerPreview, compressPreview;
+import '../../stickers/sticker_store.dart'
+    show StickerStore, StickerPack, StickerItem;
 import 'chat_widgets.dart';
 import 'package:just_audio/just_audio.dart';
 import 'audio_player_holder.dart';
+
+/// Функция для парсинга сообщений в isolate (не блокирует UI)
+List<UiMessage> _parseMessagesIsolate(Map<String, dynamic> params) {
+  final msgs = params['msgs'] as List;
+  final filesBaseDir = params['filesBaseDir'] as String?;
+  final parsed = <UiMessage>[];
+  for (final raw in msgs) {
+    try {
+      final ui = parseChatItem(
+        Map<String, dynamic>.from(raw as Map),
+        filesBaseDir: filesBaseDir,
+      );
+      if (ui != null) parsed.add(ui);
+    } catch (_) {}
+  }
+  return parsed;
+}
+
+// Глобальный кеш — не сбрасывается при создании новых экранов
+String? _globalFilesDirCache;
 
 class _ChatHeader extends StatelessWidget {
   final String title;
@@ -50,8 +75,12 @@ class _ChatHeader extends StatelessWidget {
       final take = runes.take(2).toList();
       return String.fromCharCodes(take).toUpperCase();
     }
-    final a = parts[0].runes.isEmpty ? '' : String.fromCharCodes([parts[0].runes.first]);
-    final b = parts[1].runes.isEmpty ? '' : String.fromCharCodes([parts[1].runes.first]);
+    final a = parts[0].runes.isEmpty
+        ? ''
+        : String.fromCharCodes([parts[0].runes.first]);
+    final b = parts[1].runes.isEmpty
+        ? ''
+        : String.fromCharCodes([parts[1].runes.first]);
     return (a + b).toUpperCase();
   }
 
@@ -63,11 +92,17 @@ class _ChatHeader extends StatelessWidget {
         CircleAvatar(
           radius: 18,
           backgroundColor: const Color(0xFF2A2A2A),
-          backgroundImage: avatarImage != null ? MemoryImage(avatarImage!) : null,
+          backgroundImage: avatarImage != null
+              ? MemoryImage(avatarImage!)
+              : null,
           child: avatarImage == null
               ? Text(
                   _initials(),
-                  style: TextStyle(color: textPrimary, fontWeight: FontWeight.w600, fontSize: 12),
+                  style: TextStyle(
+                    color: textPrimary,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 12,
+                  ),
                 )
               : null,
         ),
@@ -79,7 +114,12 @@ class _ChatHeader extends StatelessWidget {
             children: [
               Text(
                 title,
-                style: TextStyle(color: textPrimary, fontSize: 16, fontWeight: FontWeight.w600, letterSpacing: -0.2),
+                style: TextStyle(
+                  color: textPrimary,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: -0.2,
+                ),
                 overflow: TextOverflow.ellipsis,
               ),
               const SizedBox(height: 2),
@@ -117,6 +157,7 @@ class ChatScreen extends ConsumerStatefulWidget {
 class _ChatScreenState extends ConsumerState<ChatScreen> {
   final TextEditingController _msgController = TextEditingController();
   List<UiMessage> _messages = [];
+  List<_DisplayEntry> _displayEntries = [];
   bool _loading = true;
   bool _sending = false;
   bool _sendingMedia = false;
@@ -130,21 +171,42 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   final StickerStore _stickerStore = StickerStore.instance;
   final PinStore _pinStore = PinStore.instance;
   final ItemScrollController _itemScrollController = ItemScrollController();
-  final ItemPositionsListener _itemPositionsListener = ItemPositionsListener.create();
+  final ItemPositionsListener _itemPositionsListener =
+      ItemPositionsListener.create();
   final Map<String, int> _displayIndexByKey = {};
   UiMessage? _replyTo;
   bool _circleMode = false;
   int _selectedPackIndex = 0;
+  final AudioRecorder _recorder = AudioRecorder();
+  bool _recording = false;
+  DateTime? _recordStartedAt;
 
   @override
   void initState() {
     super.initState();
-    _initFilesDir().then((_) => _loadMessages());
+    final t0 = DateTime.now();
+    debugPrint('💬 ChatScreen initState: ${widget.chatRef}');
+    // Откладываем загрузку чтобы анимация перехода прошла плавно
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        final t1 = DateTime.now();
+        debugPrint(
+          '📂 Начало загрузки, задержка после кадра: ${t1.difference(t0).inMilliseconds}ms',
+        );
+        _initFilesDir().then((_) {
+          if (mounted) _loadMessages(t0);
+        });
+      }
+    });
     _pinStore.load();
-    _eventSub = ref.read(tanglexServiceProvider).eventStream.listen(_handleEvent);
+    _eventSub = ref
+        .read(tanglexServiceProvider)
+        .eventStream
+        .listen(_handleEvent);
     _audioStateSub = _audioPlayer.playerStateStream.listen((state) {
       if (!mounted) return;
-      if (state.processingState == ProcessingState.completed || state.processingState == ProcessingState.idle) {
+      if (state.processingState == ProcessingState.completed ||
+          state.processingState == ProcessingState.idle) {
         if (_audioNowPlaying != null) {
           setState(() => _audioNowPlaying = null);
         }
@@ -153,84 +215,116 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   }
 
   Future<void> _initFilesDir() async {
+    // Глобальный кеш — не сбрасывается при создании новых экранов
+    if (_globalFilesDirCache != null) {
+      _filesDir = _globalFilesDirCache!;
+      return;
+    }
+    final t0 = DateTime.now();
     try {
       final docs = await getApplicationDocumentsDirectory();
       final dir = Directory('${docs.path}/files');
       if (!dir.existsSync()) dir.createSync(recursive: true);
       _filesDir = dir.path;
+      _globalFilesDirCache = dir.path;
+      debugPrint(
+        '📁 _initFilesDir: ${DateTime.now().difference(t0).inMilliseconds}ms',
+      );
     } catch (_) {}
   }
 
-  Future<void> _loadMessages() async {
+  Future<void> _loadMessages([DateTime? openedAt]) async {
+    final tStart = DateTime.now();
+    final refTime = openedAt ?? tStart;
+    if (openedAt != null) {
+      debugPrint(
+        '⏳ _loadMessages: начало (общее время: ${tStart.difference(openedAt).inMilliseconds}ms)',
+      );
+    }
     try {
-      setState(() => _loading = true);
+      setState(() => _loading = _messages.isEmpty);
       final service = ref.read(tanglexServiceProvider);
+      final tBeforeGet = DateTime.now();
       final msgs = await service.getChatMessages(widget.chatRef);
-      final parsed = <UiMessage>[];
-      for (final raw in msgs) {
-        try {
-          final ui = parseChatItem(raw, filesBaseDir: _filesDir);
-          if (ui != null) parsed.add(ui);
-        } catch (e) {
-          debugPrint('Error parsing message: $e');
-        }
-      }
+      debugPrint(
+        '📨 getChatMessages: ${msgs.length} шт, заняло ${DateTime.now().difference(tBeforeGet).inMilliseconds}ms',
+      );
+      final tBeforeParse = DateTime.now();
+      // Парсим в isolate чтобы не блокировать UI
+      final List<Map<String, dynamic>> jsonMsgs = msgs
+          .map((m) => Map<String, dynamic>.from(m))
+          .toList();
+      final parsed = await compute(_parseMessagesIsolate, {
+        'msgs': jsonMsgs,
+        'filesBaseDir': _filesDir,
+      });
       parsed.sort((a, b) {
         final at = a.time ?? DateTime.fromMillisecondsSinceEpoch(0);
         final bt = b.time ?? DateTime.fromMillisecondsSinceEpoch(0);
         return bt.compareTo(at);
       });
       if (!mounted) return;
+      final tBeforeSetState = DateTime.now();
       setState(() {
-        _messages = parsed;
+        _applyMessages(parsed);
         _loading = false;
       });
+      debugPrint(
+        '✅ Сообщения загружены: ${parsed.length} шт, парсинг: ${tBeforeSetState.difference(tBeforeParse).inMilliseconds}ms, '
+        'всего: ${DateTime.now().difference(refTime).inMilliseconds}ms',
+      );
 
-    final pinPattern = RegExp(r'^/pin\s+');
-    final shortPin = RegExp(r'^/p\s+');
-    bool anyChanged = false;
-    final cleaned = <UiMessage>[];
-    for (final m in parsed) {
-      if (pinPattern.hasMatch(m.text) || shortPin.hasMatch(m.text)) {
-        final actualText = m.text
-            .replaceFirst(pinPattern, '')
-            .replaceFirst(shortPin, '');
-        if (!_pinStore.isPinned(widget.chatRef, m.key)) {
-          await _pinStore.pin(PinnedMessage(
-            chatRef: widget.chatRef,
-            key: m.key,
-            text: actualText,
-            imageFilePath: m.images.isNotEmpty ? m.images.first.filePath : null,
-            timeStr: m.timeStr,
-            pinnedAt: DateTime.now(),
-          ));
+      final pinPattern = RegExp(r'^/pin\s+');
+      final shortPin = RegExp(r'^/p\s+');
+      bool anyChanged = false;
+      final cleaned = <UiMessage>[];
+      for (final m in parsed) {
+        if (pinPattern.hasMatch(m.text) || shortPin.hasMatch(m.text)) {
+          final actualText = m.text
+              .replaceFirst(pinPattern, '')
+              .replaceFirst(shortPin, '');
+          if (!_pinStore.isPinned(widget.chatRef, m.key)) {
+            await _pinStore.pin(
+              PinnedMessage(
+                chatRef: widget.chatRef,
+                key: m.key,
+                text: actualText,
+                imageFilePath: m.images.isNotEmpty
+                    ? m.images.first.filePath
+                    : null,
+                timeStr: m.timeStr,
+                pinnedAt: DateTime.now(),
+              ),
+            );
+          }
+          cleaned.add(
+            UiMessage(
+              key: m.key,
+              text: actualText,
+              fromMe: m.fromMe,
+              timeStr: m.timeStr,
+              status: m.status,
+              isSystem: m.isSystem,
+              images: m.images,
+              time: m.time,
+              audio: m.audio,
+              fileName: m.fileName,
+              fileSize: m.fileSize,
+              filePath: m.filePath,
+              quoted: m.quoted,
+              itemId: m.itemId,
+            ),
+          );
+          anyChanged = true;
+        } else {
+          cleaned.add(m);
         }
-        cleaned.add(UiMessage(
-          key: m.key,
-          text: actualText,
-          fromMe: m.fromMe,
-          timeStr: m.timeStr,
-          status: m.status,
-          isSystem: m.isSystem,
-          images: m.images,
-          time: m.time,
-          audio: m.audio,
-          fileName: m.fileName,
-          fileSize: m.fileSize,
-          filePath: m.filePath,
-          quoted: m.quoted,
-          itemId: m.itemId,
-        ));
-        anyChanged = true;
-      } else {
-        cleaned.add(m);
       }
-    }
-    if (anyChanged) {
-      setState(() => _messages = cleaned);
-    }
+      if (anyChanged) {
+        setState(() => _applyMessages(cleaned));
+      }
 
-    await _autoReceiveImages(anyChanged ? cleaned : parsed);
+      await _autoReceiveImages(anyChanged ? cleaned : parsed);
     } catch (e) {
       debugPrint('Error loading messages: $e');
       if (mounted) {
@@ -255,21 +349,29 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final quotedItemId = _replyTo?.itemId;
 
     final service = ref.read(tanglexServiceProvider);
-    final success = await service.sendMessage(widget.chatRef, actualText, quotedItemId: quotedItemId);
+    final success = await service.sendMessage(
+      widget.chatRef,
+      actualText,
+      quotedItemId: quotedItemId,
+    );
 
     if (success && shouldPin) {
       await Future.delayed(const Duration(milliseconds: 500));
       await _loadMessages();
       if (_messages.isNotEmpty) {
         final lastMsg = _messages.first;
-        await _pinStore.pin(PinnedMessage(
-          chatRef: widget.chatRef,
-          key: lastMsg.key,
-          text: lastMsg.text,
-          imageFilePath: lastMsg.images.isNotEmpty ? lastMsg.images.first.filePath : null,
-          timeStr: lastMsg.timeStr,
-          pinnedAt: DateTime.now(),
-        ));
+        await _pinStore.pin(
+          PinnedMessage(
+            chatRef: widget.chatRef,
+            key: lastMsg.key,
+            text: lastMsg.text,
+            imageFilePath: lastMsg.images.isNotEmpty
+                ? lastMsg.images.first.filePath
+                : null,
+            timeStr: lastMsg.timeStr,
+            pinnedAt: DateTime.now(),
+          ),
+        );
       }
     } else if (success) {
       await _loadMessages();
@@ -292,13 +394,19 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     for (final f in files) {
       final bytes = await f.readAsBytes();
       final preview = makePreview(bytes);
-      payload.add(ImagePayload(
-        filePath: f.path,
-        previewBytes: preview.bytes,
-        previewMime: preview.mime,
-      ));
+      payload.add(
+        ImagePayload(
+          filePath: f.path,
+          previewBytes: preview.bytes,
+          previewMime: preview.mime,
+        ),
+      );
     }
-    final ok = await service.sendImages(widget.chatRef, payload, quotedItemId: _replyTo?.itemId);
+    final ok = await service.sendImages(
+      widget.chatRef,
+      payload,
+      quotedItemId: _replyTo?.itemId,
+    );
     if (ok) {
       await _loadMessages();
       if (mounted) setState(() => _replyTo = null);
@@ -333,7 +441,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           content: Text(
             resultSend.error == null
                 ? loc.translate('failed_send_video')
-                : loc.translate('failed_send_error').replaceAll('%s', resultSend.error ?? ''),
+                : loc
+                      .translate('failed_send_error')
+                      .replaceAll('%s', resultSend.error ?? ''),
           ),
         ),
       );
@@ -353,11 +463,17 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     if (path == null) return;
     setState(() => _sendingMedia = true);
     final service = ref.read(tanglexServiceProvider);
-    final stablePath = await _maybePersistPickedFile(path, audioOnly: audioOnly);
+    final stablePath = await _maybePersistPickedFile(
+      path,
+      audioOnly: audioOnly,
+    );
+    final lower = stablePath.toLowerCase();
+    final isStickerFile = lower.endsWith('.webp') || lower.endsWith('.webm');
+    final tagText = isStickerFile ? '/sticker' : '';
     final resultSend = await service.sendFile(
       chatRef: widget.chatRef,
       filePath: stablePath,
-      text: '',
+      text: tagText,
       quotedItemId: _replyTo?.itemId,
     );
     if (resultSend.ok) {
@@ -369,7 +485,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           content: Text(
             resultSend.error == null
                 ? loc.translate('failed_send_file')
-                : loc.translate('failed_send_error').replaceAll('%s', resultSend.error ?? ''),
+                : loc
+                      .translate('failed_send_error')
+                      .replaceAll('%s', resultSend.error ?? ''),
           ),
         ),
       );
@@ -377,7 +495,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     setState(() => _sendingMedia = false);
   }
 
-  Future<String> _maybePersistPickedFile(String path, {required bool audioOnly}) async {
+  Future<String> _maybePersistPickedFile(
+    String path, {
+    required bool audioOnly,
+  }) async {
     final shouldPersist = audioOnly || _isAudioPath(path);
     if (!shouldPersist) return path;
     try {
@@ -385,7 +506,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       final dir = Directory('${docs.path}/media_cache');
       if (!dir.existsSync()) dir.createSync(recursive: true);
       final ext = _fileExt(path);
-      final target = File('${dir.path}/file_${DateTime.now().millisecondsSinceEpoch}$ext');
+      final target = File(
+        '${dir.path}/file_${DateTime.now().millisecondsSinceEpoch}$ext',
+      );
       await File(path).copy(target.path);
       return target.path;
     } catch (_) {
@@ -440,6 +563,68 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     setState(() => _sendingMedia = false);
   }
 
+  Future<void> _startVoiceRecording() async {
+    if (_recording || _sendingMedia) return;
+    final hasPerm = await _recorder.hasPermission();
+    if (!hasPerm) return;
+    try {
+      final tmp = await getTemporaryDirectory();
+      final ts = DateTime.now().millisecondsSinceEpoch;
+      final path = '${tmp.path}/voice_$ts.m4a';
+      await _recorder.start(
+        const RecordConfig(encoder: AudioEncoder.aacLc, bitRate: 64000),
+        path: path,
+      );
+      _recordStartedAt = DateTime.now();
+      if (mounted) setState(() => _recording = true);
+    } catch (_) {
+      if (mounted) setState(() => _recording = false);
+    }
+  }
+
+  Future<void> _stopVoiceRecording() async {
+    if (!_recording) return;
+    try {
+      final path = await _recorder.stop();
+      final startedAt = _recordStartedAt;
+      _recordStartedAt = null;
+      if (mounted) setState(() => _recording = false);
+      if (path == null || startedAt == null) return;
+      final durationSec =
+          DateTime.now().difference(startedAt).inSeconds.clamp(1, 600);
+      await _sendVoice(path, durationSec);
+    } catch (_) {
+      if (mounted) setState(() => _recording = false);
+    }
+  }
+
+  Future<void> _sendVoice(String path, int durationSec) async {
+    if (_sendingMedia) return;
+    setState(() => _sendingMedia = true);
+    final service = ref.read(tanglexServiceProvider);
+    final result = await service.sendVoice(
+      chatRef: widget.chatRef,
+      filePath: path,
+      durationSec: durationSec,
+      quotedItemId: _replyTo?.itemId,
+    );
+    if (result.ok) {
+      await _loadMessages();
+      if (mounted) setState(() => _replyTo = null);
+    } else if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            result.error == null
+                ? 'Не удалось отправить голосовое'
+                : 'Не удалось отправить: ${result.error}',
+          ),
+        ),
+      );
+    }
+    if (mounted) setState(() => _sendingMedia = false);
+  }
+
   void _openStickerPicker() {
     showModalBottomSheet<void>(
       context: context,
@@ -467,7 +652,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               ? () async {
                   if (_selectedPackIndex < _stickerStore.packs.length) {
                     final pack = _stickerStore.packs[_selectedPackIndex];
-                    final path = await _stickerStore.exportPack(packId: pack.id);
+                    final path = await _stickerStore.exportPack(
+                      packId: pack.id,
+                    );
                     if (path != null && mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(content: Text('Exported to $path')),
@@ -503,7 +690,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             children: [
               TextField(
                 controller: nameCtrl,
-                decoration: InputDecoration(labelText: loc.translate('sticker_name')),
+                decoration: InputDecoration(
+                  labelText: loc.translate('sticker_name'),
+                ),
                 onChanged: (v) {
                   if (idCtrl.text.isEmpty) {
                     idCtrl.text = slugify(v);
@@ -512,17 +701,27 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               ),
               TextField(
                 controller: idCtrl,
-                decoration: InputDecoration(labelText: loc.translate('sticker_id')),
+                decoration: InputDecoration(
+                  labelText: loc.translate('sticker_id'),
+                ),
               ),
               TextField(
                 controller: authorCtrl,
-                decoration: InputDecoration(labelText: loc.translate('sticker_author')),
+                decoration: InputDecoration(
+                  labelText: loc.translate('sticker_author'),
+                ),
               ),
             ],
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.of(ctx).pop(), child: Text(loc.translate('cancel'))),
-            TextButton(onPressed: () => Navigator.of(ctx).pop(), child: Text(loc.translate('sticker_next'))),
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: Text(loc.translate('cancel')),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: Text(loc.translate('sticker_next')),
+            ),
           ],
         );
       },
@@ -558,22 +757,34 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               ListTile(
                 leading: const Icon(Icons.photo),
                 title: Text(loc.translate('photo')),
-                onTap: () { Navigator.of(ctx).pop(); _sendImages(); },
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  _sendImages();
+                },
               ),
               ListTile(
                 leading: const Icon(Icons.videocam),
                 title: Text(loc.translate('video')),
-                onTap: () { Navigator.of(ctx).pop(); _pickVideo(); },
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  _pickVideo();
+                },
               ),
               ListTile(
                 leading: const Icon(Icons.music_note),
                 title: Text(loc.translate('audio')),
-                onTap: () { Navigator.of(ctx).pop(); _pickFile(audioOnly: true); },
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  _pickFile(audioOnly: true);
+                },
               ),
               ListTile(
                 leading: const Icon(Icons.attach_file),
                 title: Text(loc.translate('file')),
-                onTap: () { Navigator.of(ctx).pop(); _pickFile(audioOnly: false); },
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  _pickFile(audioOnly: false);
+                },
               ),
             ],
           ),
@@ -586,9 +797,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     if (audio.filePath == null) return;
     if (!File(audio.filePath!).existsSync()) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Аудиофайл недоступен')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Аудиофайл недоступен')));
       }
       return;
     }
@@ -605,7 +816,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         }
       }
       setState(() {
-        _audioNowPlaying = AudioNowPlaying(filePath: audio.filePath!, title: audio.title);
+        _audioNowPlaying = AudioNowPlaying(
+          filePath: audio.filePath!,
+          title: audio.title,
+        );
       });
     } catch (_) {}
   }
@@ -623,7 +837,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final img = images[index];
     if (img.isVideo && !img.isCircle) {
       if (img.filePath == null) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Файл ещё не загружен')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Файл ещё не загружен')));
         return;
       }
       Navigator.of(context).push(
@@ -706,7 +922,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           content: Text(
             resultSend.error == null
                 ? loc.translate('failed_send_circle')
-                : loc.translate('failed_send_error').replaceAll('%s', resultSend.error ?? ''),
+                : loc
+                      .translate('failed_send_error')
+                      .replaceAll('%s', resultSend.error ?? ''),
           ),
         ),
       );
@@ -726,7 +944,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     }
     if (result['chatItems'] is List) {
       for (final item in result['chatItems'] as List) {
-        if (item is Map<String, dynamic>) chatItems.add(Map<String, dynamic>.from(item));
+        if (item is Map<String, dynamic>)
+          chatItems.add(Map<String, dynamic>.from(item));
       }
     }
     if (chatItems.isEmpty) return;
@@ -756,11 +975,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     int i = 0;
     while (i < messages.length) {
       final m = messages[i];
-
       if (m.time != null) {
         final msgDate = DateTime(m.time!.year, m.time!.month, m.time!.day);
-        if (lastDate == null || msgDate != lastDate) {
-          entries.add(_DisplayEntry.date(m.time!));
+        if (lastDate == null) {
+          lastDate = msgDate;
+        } else if (msgDate != lastDate) {
+          entries.add(_DisplayEntry.date(lastDate));
           lastDate = msgDate;
         }
       }
@@ -770,7 +990,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         int j = i + 1;
         while (j < messages.length) {
           final next = messages[j];
-          final canGroup = !next.isSystem &&
+          final canGroup =
+              !next.isSystem &&
               next.images.isNotEmpty &&
               next.fromMe == m.fromMe &&
               next.text.isEmpty &&
@@ -789,18 +1010,20 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         for (final g in group) {
           _displayIndexByKey[g.key] = entryIndex;
         }
-        entries.add(_DisplayEntry.group(
-          UiMessage(
-            key: 'group_${m.key}',
-            text: m.text,
-            fromMe: m.fromMe,
-            timeStr: m.timeStr,
-            status: m.status,
-            isSystem: false,
-            images: allImages,
-            time: m.time,
+        entries.add(
+          _DisplayEntry.group(
+            UiMessage(
+              key: 'group_${m.key}',
+              text: m.text,
+              fromMe: m.fromMe,
+              timeStr: m.timeStr,
+              status: m.status,
+              isSystem: false,
+              images: allImages,
+              time: m.time,
+            ),
           ),
-        ));
+        );
         i = j;
         continue;
       }
@@ -812,7 +1035,15 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       }
       i++;
     }
+    if (lastDate != null) {
+      entries.add(_DisplayEntry.date(lastDate));
+    }
     return entries;
+  }
+
+  void _applyMessages(List<UiMessage> messages) {
+    _messages = messages;
+    _displayEntries = _buildDisplayEntries(messages);
   }
 
   Widget _buildMessageBubble(UiMessage m) {
@@ -827,10 +1058,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       isPinned: isPinned,
       audioPlayer: _audioPlayer,
       nowPlaying: _audioNowPlaying,
-      onLongPress: (d, ctx) => _showMessageOptions(ctx, d.globalPosition, m, isPinned),
+      onLongPress: (d, ctx) =>
+          _showMessageOptions(ctx, d.globalPosition, m, isPinned),
       onSwipeReply: () {
         if (m.itemId == null) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Ответ недоступен')));
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('Ответ недоступен')));
           return;
         }
         setState(() => _replyTo = m);
@@ -845,7 +1079,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     );
   }
 
-  Future<void> _scrollToMessage(String msgKey, {void Function()? onComplete}) async {
+  Future<void> _scrollToMessage(
+    String msgKey, {
+    void Function()? onComplete,
+  }) async {
     var idx = _displayIndexByKey[msgKey];
     if (idx == null && msgKey.startsWith('group_')) {
       final originalKey = msgKey.substring(6);
@@ -866,13 +1103,17 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     // Ищем сообщение с нужным itemId в _messages
     final idx = _messages.indexWhere((m) => m.itemId == itemId);
     if (idx == -1) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Сообщение не найдено')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Сообщение не найдено')));
       return;
     }
     final target = _messages[idx];
     final displayIdx = _displayIndexByKey[target.key];
     if (displayIdx == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Сообщение не найдено')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Сообщение не найдено')));
       return;
     }
     if (!_itemScrollController.isAttached) return;
@@ -914,7 +1155,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     );
   }
 
-  Future<void> _showMessageOptions(BuildContext ctx, Offset tapPosition, UiMessage m, bool isPinned) async {
+  Future<void> _showMessageOptions(
+    BuildContext ctx,
+    Offset tapPosition,
+    UiMessage m,
+    bool isPinned,
+  ) async {
     final screenH = MediaQuery.of(ctx).size.height;
     final screenW = MediaQuery.of(ctx).size.width;
     final menuW = 210.0;
@@ -926,7 +1172,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           value: 'pin',
           child: Row(
             children: [
-              Icon(isPinned ? Icons.push_pin : Icons.push_pin_outlined, size: 20),
+              Icon(
+                isPinned ? Icons.push_pin : Icons.push_pin_outlined,
+                size: 20,
+              ),
               const SizedBox(width: 12),
               Text(isPinned ? 'Открепить' : 'Закрепить'),
             ],
@@ -938,26 +1187,47 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       items.add(
         const PopupMenuItem<String>(
           value: 'copy',
-          child: Row(children: [Icon(Icons.copy, size: 20), SizedBox(width: 12), Text('Копировать')]),
+          child: Row(
+            children: [
+              Icon(Icons.copy, size: 20),
+              SizedBox(width: 12),
+              Text('Копировать'),
+            ],
+          ),
         ),
       );
     }
     items.add(
       const PopupMenuItem<String>(
         value: 'reply',
-        child: Row(children: [Icon(Icons.reply, size: 20), SizedBox(width: 12), Text('Ответить')]),
+        child: Row(
+          children: [
+            Icon(Icons.reply, size: 20),
+            SizedBox(width: 12),
+            Text('Ответить'),
+          ],
+        ),
       ),
     );
     final menuH = items.length * 48.0 + 8.0;
-    final menuY = tapPosition.dy < screenH / 2 ? tapPosition.dy + 8 : tapPosition.dy - menuH - 8;
+    final menuY = tapPosition.dy < screenH / 2
+        ? tapPosition.dy + 8
+        : tapPosition.dy - menuH - 8;
 
     await showMenu<String>(
       context: ctx,
       position: RelativeRect.fromSize(
-        Rect.fromLTWH((centerX - menuW / 2).clamp(10.0, screenW - menuW), menuY.clamp(10.0, screenH - menuH), menuW, menuH),
+        Rect.fromLTWH(
+          (centerX - menuW / 2).clamp(10.0, screenW - menuW),
+          menuY.clamp(10.0, screenH - menuH),
+          menuW,
+          menuH,
+        ),
         Size(screenW, screenH),
       ),
-      color: Theme.of(ctx).brightness == Brightness.dark ? const Color(0xFF1E232A) : const Color(0xFFFFFFFF),
+      color: Theme.of(ctx).brightness == Brightness.dark
+          ? const Color(0xFF1E232A)
+          : const Color(0xFFFFFFFF),
       elevation: 8,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       items: items,
@@ -966,24 +1236,32 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         if (isPinned) {
           _pinStore.unpin(widget.chatRef, m.key);
         } else {
-          _pinStore.pin(PinnedMessage(
-            chatRef: widget.chatRef,
-            key: m.key,
-            text: m.text,
-            imageFilePath: m.images.isNotEmpty ? m.images.first?.filePath : null,
-            timeStr: m.timeStr,
-            pinnedAt: DateTime.now(),
-          ));
+          _pinStore.pin(
+            PinnedMessage(
+              chatRef: widget.chatRef,
+              key: m.key,
+              text: m.text,
+              imageFilePath: m.images.isNotEmpty
+                  ? m.images.first.filePath
+                  : null,
+              timeStr: m.timeStr,
+              pinnedAt: DateTime.now(),
+            ),
+          );
         }
         setState(() {});
       } else if (value == 'copy') {
         Clipboard.setData(ClipboardData(text: m.text));
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Скопировано')));
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('Скопировано')));
         }
       } else if (value == 'reply') {
         if (m.itemId == null) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Ответ недоступен')));
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('Ответ недоступен')));
           return;
         }
         setState(() => _replyTo = m);
@@ -1003,7 +1281,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         if (img.hasFullImage) continue;
         if (m.fromMe) continue;
         if (img.fileStatusType != 'rcvInvitation') continue;
-        if (img.fileSize != null && img.fileSize! > maxAutoReceiveImageSize) continue;
+        if (img.fileSize != null && img.fileSize! > maxAutoReceiveImageSize)
+          continue;
         _autoRequestedFiles.add(fileId);
         await Future<void>.delayed(const Duration(milliseconds: 300));
         final ok = await service.receiveFile(
@@ -1019,7 +1298,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   }
 
   Future<void> _requestFullImage(UiImage image) async {
-    final loc = AppLocalizations.of(context);
     if (image.fileId == null) return;
     if (image.fileStatusType != 'rcvInvitation') return;
     final service = ref.read(tanglexServiceProvider);
@@ -1037,9 +1315,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     } catch (e) {
       debugPrint('Error requesting file: $e');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Ошибка загрузки файла')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Ошибка загрузки файла')));
       }
     }
   }
@@ -1050,6 +1328,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     _audioStateSub?.cancel();
     _eventSub?.cancel();
     _refreshDebounce?.cancel();
+    _recorder.dispose();
     super.dispose();
   }
 
@@ -1057,7 +1336,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   Widget build(BuildContext context) {
     final loc = AppLocalizations.of(context);
     final theme = Theme.of(context);
-    final displayEntries = _buildDisplayEntries(_messages);
+    final displayEntries = _displayEntries;
 
     final chatBackground = const Color(0xFF000000);
     final headerBg = const Color(0xFF111111);
@@ -1075,12 +1354,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         flexibleSpace: ClipRect(
           child: BackdropFilter(
             filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-            child: Container(
-              color: headerBg.withOpacity(0.85),
-            ),
+            child: Container(color: headerBg.withOpacity(0.85)),
           ),
         ),
-        leading: IconButton(icon: Icon(Icons.arrow_back, color: textPrimary), onPressed: () => Navigator.of(context).pop()),
+        leading: IconButton(
+          icon: Icon(Icons.arrow_back, color: textPrimary),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
         titleSpacing: 0,
         title: _ChatHeader(
           title: widget.chatName,
@@ -1092,262 +1372,362 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       ),
       body: SelectionArea(
         child: Column(
-        children: [
-          if (_audioNowPlaying != null)
-            AudioMiniPlayer(
-              player: _audioPlayer,
-              title: _audioNowPlaying!.title,
-              onClose: _stopAudio,
-            ),
-          Expanded(
-            child: _loading
-                ? const Center(child: CircularProgressIndicator())
-                : _messages.isEmpty
-                    ? Center(child: Text(loc.translate('no_messages_yet'), style: TextStyle(color: textSecondary)))
-                    : Column(
-                        children: [
-                          if (_pinStore.getPinCount(widget.chatRef) > 0)
-                            ValueListenableBuilder<Iterable<ItemPosition>>(
-                              valueListenable: _itemPositionsListener.itemPositions,
-                              builder: (context, positions, _) {
-                                return PinnedBar(
-                                  pinned: _pinStore.getPinned(widget.chatRef).reversed.toList(),
-                                  onPinTap: (pm, {onComplete}) => _scrollToMessage(pm.key, onComplete: onComplete),
-                                  onUnpin: (pm) { _pinStore.unpin(widget.chatRef, pm.key); setState(() {}); },
-                                  isPinVisible: (pm) => _isMessageVisible(pm.key, positions),
-                                );
-                              },
-                            ),
-                          Expanded(
-                            child: ValueListenableBuilder<Iterable<ItemPosition>>(
-                              valueListenable: _itemPositionsListener.itemPositions,
-                              builder: (context, positions, child) {
-                                return Stack(
-                                  children: [
-                                    ScrollablePositionedList.builder(
-                                      itemScrollController: _itemScrollController,
-                                      itemPositionsListener: _itemPositionsListener,
-                                      reverse: true,
-                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                                      itemCount: displayEntries.length,
-                                      itemBuilder: (context, index) {
-                                        final entry = displayEntries[index];
-                                        switch (entry.type) {
-                                          case _DisplayEntryType.date:
-                                            return DateDivider(date: entry.date!);
-                                          case _DisplayEntryType.system:
-                                            return SystemBubble(text: entry.message!.text);
-                                          case _DisplayEntryType.group:
-                                          case _DisplayEntryType.message:
-                                            return _buildMessageBubble(entry.message!);
-                                        }
-                                      },
+          children: [
+            if (_audioNowPlaying != null)
+              AudioMiniPlayer(
+                player: _audioPlayer,
+                title: _audioNowPlaying!.title,
+                onClose: _stopAudio,
+              ),
+            Expanded(
+              child: _loading
+                  ? const Center(child: CircularProgressIndicator())
+                  : _messages.isEmpty
+                  ? Center(
+                      child: Text(
+                        loc.translate('no_messages_yet'),
+                        style: TextStyle(color: textSecondary),
+                      ),
+                    )
+                  : Column(
+                      children: [
+                        if (_pinStore.getPinCount(widget.chatRef) > 0)
+                          ValueListenableBuilder<Iterable<ItemPosition>>(
+                            valueListenable:
+                                _itemPositionsListener.itemPositions,
+                            builder: (context, positions, _) {
+                              return PinnedBar(
+                                pinned: _pinStore
+                                    .getPinned(widget.chatRef)
+                                    .reversed
+                                    .toList(),
+                                onPinTap: (pm, {onComplete}) =>
+                                    _scrollToMessage(
+                                      pm.key,
+                                      onComplete: onComplete,
                                     ),
-                                    if (_shouldShowScrollToBottom(positions))
-                                      Positioned(
-                                        right: 12,
-                                        bottom: 12,
-                                        child: FloatingActionButton(
-                                          mini: true,
-                                          backgroundColor: const Color(0xFF2A2D32),
-                                          elevation: 4,
-                                          onPressed: _scrollToBottom,
-                                          child: const Icon(Icons.arrow_downward, size: 20, color: Color(0xFF808080)),
+                                onUnpin: (pm) {
+                                  _pinStore.unpin(widget.chatRef, pm.key);
+                                  setState(() {});
+                                },
+                                isPinVisible: (pm) =>
+                                    _isMessageVisible(pm.key, positions),
+                              );
+                            },
+                          ),
+                        Expanded(
+                          child: ValueListenableBuilder<Iterable<ItemPosition>>(
+                            valueListenable:
+                                _itemPositionsListener.itemPositions,
+                            builder: (context, positions, child) {
+                              return Stack(
+                                children: [
+                                  ScrollablePositionedList.builder(
+                                    itemScrollController: _itemScrollController,
+                                    itemPositionsListener:
+                                        _itemPositionsListener,
+                                    reverse: true,
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                      vertical: 8,
+                                    ),
+                                    itemCount: displayEntries.length,
+                                    itemBuilder: (context, index) {
+                                      final entry = displayEntries[index];
+                                      switch (entry.type) {
+                                        case _DisplayEntryType.date:
+                                          return DateDivider(date: entry.date!);
+                                        case _DisplayEntryType.system:
+                                          return SystemBubble(
+                                            text: entry.message!.text,
+                                          );
+                                        case _DisplayEntryType.group:
+                                        case _DisplayEntryType.message:
+                                          return _buildMessageBubble(
+                                            entry.message!,
+                                          );
+                                      }
+                                    },
+                                  ),
+                                  if (_shouldShowScrollToBottom(positions))
+                                    Positioned(
+                                      right: 12,
+                                      bottom: 12,
+                                      child: FloatingActionButton(
+                                        mini: true,
+                                        backgroundColor: const Color(
+                                          0xFF2A2D32,
+                                        ),
+                                        elevation: 4,
+                                        onPressed: _scrollToBottom,
+                                        child: const Icon(
+                                          Icons.arrow_downward,
+                                          size: 20,
+                                          color: Color(0xFF808080),
                                         ),
                                       ),
-                                  ],
-                                );
-                              },
-                            ),
+                                    ),
+                                ],
+                              );
+                            },
                           ),
-                        ],
-                      ),
-          ),
-          SafeArea(
-            child: Container(
-              padding: const EdgeInsets.fromLTRB(8, 6, 8, 8),
-              decoration: BoxDecoration(
-                color: inputBg,
-                border: const Border(
-                  top: BorderSide(
-                    color: Color(0xFF333333),
+                        ),
+                      ],
+                    ),
+            ),
+            SafeArea(
+              child: Container(
+                padding: const EdgeInsets.fromLTRB(8, 6, 8, 8),
+                decoration: BoxDecoration(
+                  color: inputBg,
+                  border: const Border(
+                    top: BorderSide(color: Color(0xFF333333)),
                   ),
                 ),
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (_replyTo != null)
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: IntrinsicWidth(
-                        child: Container(
-                          margin: const EdgeInsets.only(bottom: 6),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF303030),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(
-                              color: const Color(0xFF3A3A3A),
-                              width: 1,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (_replyTo != null)
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: IntrinsicWidth(
+                          child: Container(
+                            margin: const EdgeInsets.only(bottom: 6),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF303030),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: const Color(0xFF3A3A3A),
+                                width: 1,
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Container(
+                                  width: 3,
+                                  height: 24,
+                                  margin: const EdgeInsets.only(
+                                    left: 8,
+                                    right: 8,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF5A9CF5),
+                                    borderRadius: BorderRadius.circular(2),
+                                  ),
+                                ),
+                                Flexible(
+                                  child: Padding(
+                                    padding: const EdgeInsets.fromLTRB(
+                                      0,
+                                      6,
+                                      8,
+                                      6,
+                                    ),
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Text(
+                                          _replyTo!.fromMe
+                                              ? 'Вы'
+                                              : widget.chatName,
+                                          style: const TextStyle(
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w600,
+                                            color: Color(0xFF5A9CF5),
+                                          ),
+                                        ),
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          _replyTo!.text.split('\n').first,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: TextStyle(
+                                            color: textPrimary,
+                                            fontSize: 13,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                                IconButton(
+                                  onPressed: () =>
+                                      setState(() => _replyTo = null),
+                                  icon: Icon(
+                                    Icons.close,
+                                    size: 16,
+                                    color: textSecondary,
+                                  ),
+                                  padding: const EdgeInsets.all(4),
+                                  constraints: const BoxConstraints(),
+                                ),
+                              ],
                             ),
                           ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Container(
-                                width: 3,
-                                height: 24,
-                                margin: const EdgeInsets.only(left: 8, right: 8),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFF5A9CF5),
-                                  borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        IconButton(
+                          onPressed: _sendingMedia ? null : _openAttachMenu,
+                          icon: Icon(Icons.attach_file, color: textSecondary),
+                        ),
+                        Expanded(
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(maxHeight: 120),
+                            child: TextField(
+                              controller: _msgController,
+                              style: TextStyle(color: textPrimary),
+                              decoration: InputDecoration(
+                                hintText: loc.translate('message_hint'),
+                                hintStyle: const TextStyle(
+                                  color: Color(0xFF606060),
+                                ),
+                                filled: false,
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(18),
+                                  borderSide: BorderSide.none,
+                                ),
+                                contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 14,
+                                  vertical: 10,
                                 ),
                               ),
-                              Flexible(
+                              maxLines: 4,
+                              minLines: 1,
+                              textCapitalization: TextCapitalization.sentences,
+                              onSubmitted: (_) => _sendMessage(),
+                            ),
+                          ),
+                        ),
+                        ValueListenableBuilder(
+                          valueListenable: _msgController,
+                          builder: (context, value, child) {
+                            final hasText = value.text.trim().isNotEmpty;
+                            if (hasText) {
+                              return IconButton(
+                                onPressed: _sending ? null : _sendMessage,
+                                icon: _sending
+                                    ? const SizedBox(
+                                        width: 20,
+                                        height: 20,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                        ),
+                                      )
+                                    : Icon(
+                                        Icons.send,
+                                        color: theme.colorScheme.primary,
+                                      ),
+                              );
+                            }
+                            return IconButton(
+                              onPressed: _sendingMedia
+                                  ? null
+                                  : _openStickerPicker,
+                              icon: Icon(
+                                Icons.emoji_emotions_outlined,
+                                color: textSecondary,
+                              ),
+                            );
+                          },
+                        ),
+                        ValueListenableBuilder(
+                          valueListenable: _msgController,
+                          builder: (context, value, child) {
+                            final hasText = value.text.trim().isNotEmpty;
+                            if (hasText) {
+                              return const SizedBox.shrink();
+                            }
+                            return Center(
+                              child: GestureDetector(
+                                onTap: () =>
+                                    setState(() => _circleMode = !_circleMode),
+                                onLongPress: _sendingMedia || !_circleMode
+                                    ? null
+                                    : _openCircleRecorder,
+                                onLongPressStart:
+                                    _sendingMedia || _circleMode
+                                        ? null
+                                        : (_) => _startVoiceRecording(),
+                                onLongPressEnd:
+                                    _sendingMedia || _circleMode
+                                        ? null
+                                        : (_) => _stopVoiceRecording(),
                                 child: Padding(
-                                  padding: const EdgeInsets.fromLTRB(0, 6, 8, 6),
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Text(
-                                        _replyTo!.fromMe ? 'Вы' : widget.chatName,
-                                        style: const TextStyle(
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.w600,
-                                          color: Color(0xFF5A9CF5),
-                                        ),
-                                      ),
-                                      const SizedBox(height: 2),
-                                      Text(
-                                        _replyTo!.text.split('\n').first,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: TextStyle(
-                                          color: textPrimary,
-                                          fontSize: 13,
-                                        ),
-                                      ),
-                                    ],
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 12,
+                                  ),
+                                  child: Icon(
+                                    _circleMode
+                                        ? Icons.radio_button_checked
+                                        : (_recording
+                                              ? Icons.mic
+                                              : Icons.mic),
+                                    color: _recording
+                                        ? const Color(0xFFCF6679)
+                                        : textSecondary,
+                                    size: 24,
                                   ),
                                 ),
                               ),
-                              IconButton(
-                                onPressed: () => setState(() => _replyTo = null),
-                                icon: Icon(Icons.close, size: 16, color: textSecondary),
-                                padding: const EdgeInsets.all(4),
-                                constraints: const BoxConstraints(),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      IconButton(
-                        onPressed: _sendingMedia ? null : _openAttachMenu,
-                        icon: Icon(Icons.attach_file, color: textSecondary),
-                      ),
-                      Expanded(
-                        child: ConstrainedBox(
-                          constraints: const BoxConstraints(maxHeight: 120),
-                          child: TextField(
-                            controller: _msgController,
-                            style: TextStyle(color: textPrimary),
-                            decoration: InputDecoration(
-                              hintText: loc.translate('message_hint'),
-                              hintStyle: const TextStyle(color: Color(0xFF606060)),
-                              filled: false,
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(18),
-                                borderSide: BorderSide.none,
-                              ),
-                              contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                            ),
-                            maxLines: 4,
-                            minLines: 1,
-                            textCapitalization: TextCapitalization.sentences,
-                            onSubmitted: (_) => _sendMessage(),
-                          ),
-                        ),
-                      ),
-                      ValueListenableBuilder(
-                        valueListenable: _msgController,
-                        builder: (context, value, child) {
-                          final hasText = value.text.trim().isNotEmpty;
-                          if (hasText) {
-                            return IconButton(
-                              onPressed: _sending ? null : _sendMessage,
-                              icon: _sending
-                                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                                  : Icon(Icons.send, color: theme.colorScheme.primary),
                             );
-                          }
-                          return IconButton(
-                            onPressed: _sendingMedia ? null : _openStickerPicker,
-                            icon: Icon(Icons.emoji_emotions_outlined, color: textSecondary),
-                          );
-                        },
-                      ),
-                      ValueListenableBuilder(
-                        valueListenable: _msgController,
-                        builder: (context, value, child) {
-                          final hasText = value.text.trim().isNotEmpty;
-                          if (hasText) {
-                            return const SizedBox.shrink();
-                          }
-                          return Center(
-                            child: GestureDetector(
-                              onTap: () => setState(() => _circleMode = !_circleMode),
-                              onLongPress: _sendingMedia
-                                  ? null
-                                  : () {
-                                      if (_circleMode) {
-                                        _openCircleRecorder();
-                                      } else {
-                                        ScaffoldMessenger.of(context).showSnackBar(
-                                          const SnackBar(content: Text('Голосовые пока недоступны')),
-                                        );
-                                      }
-                                    },
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
-                                child: Icon(
-                                  _circleMode ? Icons.radio_button_checked : Icons.mic,
-                                  color: textSecondary,
-                                  size: 24,
-                                ),
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-                    ],
-                  ),
-                ],
+                          },
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
             ),
-          ),
-        ],
-      ),
+          ],
+        ),
       ),
     );
   }
 
   Future<PreviewPayload> _generateVideoThumb(String path) async {
-    // Заглушка — реальная генерация в tanglex_service
-    return PreviewPayload(bytes: Uint8List(0), mime: 'image/jpeg');
+    try {
+      final data = await vthumb.VideoThumbnail.thumbnailData(
+        video: path,
+        imageFormat: vthumb.ImageFormat.JPEG,
+        maxWidth: 320,
+        quality: 70,
+      );
+      if (data == null || data.isEmpty) {
+        return PreviewPayload(bytes: Uint8List(0), mime: 'image/jpeg');
+      }
+      return PreviewPayload(bytes: data, mime: 'image/jpeg');
+    } catch (_) {
+      return PreviewPayload(bytes: Uint8List(0), mime: 'image/jpeg');
+    }
   }
 
   Future<int> _getVideoDuration(String path) async {
-    return 0;
+    try {
+      final controller = VideoPlayerController.file(File(path));
+      await controller.initialize();
+      final duration = controller.value.duration.inSeconds;
+      await controller.dispose();
+      return duration;
+    } catch (_) {
+      return 0;
+    }
   }
 
   Future<PreviewPayload> _generateStickerPreview(String path) async {
-    // Заглушка — реальная генерация в tanglex_service
-    return PreviewPayload(bytes: Uint8List(0), mime: 'image/jpeg');
+    try {
+      final bytes = await File(path).readAsBytes();
+      final preview = prepareStickerPreview(bytes);
+      return compressPreview(preview, maxBytes: 45000);
+    } catch (_) {
+      return PreviewPayload(bytes: Uint8List(0), mime: 'image/jpeg');
+    }
   }
 }
 
@@ -1360,8 +1740,12 @@ class _DisplayEntry {
 
   const _DisplayEntry._(this.type, {this.message, this.date});
 
-  factory _DisplayEntry.date(DateTime date) => _DisplayEntry._(_DisplayEntryType.date, date: date);
-  factory _DisplayEntry.system(UiMessage message) => _DisplayEntry._(_DisplayEntryType.system, message: message);
-  factory _DisplayEntry.message(UiMessage message) => _DisplayEntry._(_DisplayEntryType.message, message: message);
-  factory _DisplayEntry.group(UiMessage message) => _DisplayEntry._(_DisplayEntryType.group, message: message);
+  factory _DisplayEntry.date(DateTime date) =>
+      _DisplayEntry._(_DisplayEntryType.date, date: date);
+  factory _DisplayEntry.system(UiMessage message) =>
+      _DisplayEntry._(_DisplayEntryType.system, message: message);
+  factory _DisplayEntry.message(UiMessage message) =>
+      _DisplayEntry._(_DisplayEntryType.message, message: message);
+  factory _DisplayEntry.group(UiMessage message) =>
+      _DisplayEntry._(_DisplayEntryType.group, message: message);
 }

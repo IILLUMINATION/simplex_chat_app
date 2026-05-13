@@ -25,7 +25,27 @@
       "Bash(cat *)",
       "Bash(which *)",
       "Bash(pacman *)",
-      "Bash(git *)"
+      "Bash(git *)",
+      "Bash(lscpu)",
+      "Bash(free *)",
+      "WebFetch(simplex.chat)",
+      "WebFetch(github.com)",
+      "Bash(wget *)",
+      "Bash(dpkg-deb *)",
+      "Bash(ar *)",
+      "Bash(tar *)",
+      "Bash(cp *)",
+      "Bash(ldd *)",
+      "Bash(ln *)",
+      "Bash(./tanglex_chat)",
+      "Bash(pkill *)",
+      "Bash(timeout *)",
+      "Bash(true)",
+      "Bash(nm *)",
+      "Bash(cd *)",
+      "Bash(echo *)",
+      "Bash(ghc *)",
+      "Bash(cabal *)"
     ]
   },
   "$version": 3

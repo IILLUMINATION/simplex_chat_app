@@ -54,7 +54,7 @@ UiMessage? parseChatItem(Map<String, dynamic> msg, {String? filesBaseDir}) {
   if (contentType == 'sndMsgContent' || contentType == 'rcvMsgContent') {
     final msgContent = content?['msgContent'] as Map<String, dynamic>?;
     final msgType = msgContent?['type'] as String?;
-    final text = msgContent?['text'] as String? ?? '';
+    final rawText = msgContent?['text'] as String? ?? '';
     final imageData = msgContent?['image'] as String?;
     final durationSec = msgContent?['duration'] as int?;
     final images = <UiImage>[];
@@ -77,8 +77,21 @@ UiMessage? parseChatItem(Map<String, dynamic> msg, {String? filesBaseDir}) {
     final transferTotal = rcvTotal ?? sndTotal ?? (hasTransferStatus ? fileSize : null);
     final fileName = fileObj?['fileName'] as String?;
     final isCircle = (fileName != null && fileName.startsWith('circle_'));
-    final isSticker = fileName != null && fileName.startsWith('st__');
-    final isWebm = fileName != null && fileName.toLowerCase().endsWith('.webm');
+    final lowerFile = fileName?.toLowerCase();
+    final isStickerName = fileName != null && fileName.startsWith('st__');
+    final isStickerType = msgType == 'sticker';
+    final hasStickerTag = rawText.trim().toLowerCase().startsWith('/sticker');
+    final isWebm = lowerFile != null && lowerFile.endsWith('.webm');
+    final isWebp = lowerFile != null && lowerFile.endsWith('.webp');
+    final isSticker = isStickerName ||
+        isStickerType ||
+        hasStickerTag ||
+        ((msgType == 'image' || msgType == 'video') &&
+            rawText.trim().isEmpty &&
+            (isWebm || isWebp));
+    final text = hasStickerTag
+        ? rawText.replaceFirst(RegExp(r'^/sticker\\s*', caseSensitive: false), '').trim()
+        : rawText;
     final audioItem = parseAudio(fileName, filePath, fileId, fileStatusType, fileSize, transferProgress, transferTotal);
     final decoded = decodeImage(imageData);
     final hasLocalFile = filePath != null && File(filePath).existsSync();
@@ -171,6 +184,33 @@ UiMessage? parseChatItem(Map<String, dynamic> msg, {String? filesBaseDir}) {
         transferTotal: transferTotal,
       );
     }
+
+    if (msgType == 'file' && isSticker) {
+      images.add(UiImage(
+        filePath: hasLocalFile ? filePath : null,
+        bytes: decoded,
+        fileId: fileId,
+        fileSize: fileSize,
+        fileStatusType: fileStatusType,
+        transferProgress: transferProgress,
+        transferTotal: transferTotal,
+        isVideo: false,
+        isSticker: true,
+        isWebm: isWebm,
+      ));
+      return UiMessage(
+        key: msgKey,
+        text: '',
+        fromMe: fromMe,
+        timeStr: timeStr,
+        status: status,
+        isSystem: false,
+        images: images,
+        time: time,
+        itemId: itemId,
+        quoted: quoted,
+      );
+    }
     String display = text;
     if (msgType == 'image') {
       display = text;
@@ -179,7 +219,7 @@ UiMessage? parseChatItem(Map<String, dynamic> msg, {String? filesBaseDir}) {
     } else if (msgType == 'voice') {
       display = text.isNotEmpty ? '🎤 $text' : '';
     } else if (msgType == 'file') {
-      display = text.isNotEmpty ? text : '';
+      display = hasStickerTag ? '' : (text.isNotEmpty ? text : '');
     } else if (msgType == 'link') {
       display = text;
     } else if (msgType == 'report') {
@@ -296,10 +336,46 @@ Uint8List? decodeImage(String? dataUri) {
   if (idx == -1) return null;
   final b64 = dataUri.substring(idx + marker.length);
   try {
-    return base64Decode(b64);
+    final bytes = base64Decode(b64);
+    if (!_looksLikeImage(bytes)) return null;
+    return bytes;
   } catch (_) {
     return null;
   }
+}
+
+bool _looksLikeImage(Uint8List bytes) {
+  if (bytes.length < 4) return false;
+  // JPEG
+  if (bytes[0] == 0xFF && bytes[1] == 0xD8) return true;
+  // PNG
+  if (bytes[0] == 0x89 &&
+      bytes[1] == 0x50 &&
+      bytes[2] == 0x4E &&
+      bytes[3] == 0x47) {
+    return true;
+  }
+  // GIF
+  if (bytes[0] == 0x47 &&
+      bytes[1] == 0x49 &&
+      bytes[2] == 0x46) {
+    return true;
+  }
+  // WEBP (RIFF....WEBP)
+  if (bytes.length >= 12 &&
+      bytes[0] == 0x52 &&
+      bytes[1] == 0x49 &&
+      bytes[2] == 0x46 &&
+      bytes[3] == 0x46 &&
+      bytes[8] == 0x57 &&
+      bytes[9] == 0x45 &&
+      bytes[10] == 0x42 &&
+      bytes[11] == 0x50) {
+    return true;
+  }
+  // BMP
+  if (bytes[0] == 0x42 && bytes[1] == 0x4D) return true;
+  return false;
 }
 
 String guessMime(String name) {

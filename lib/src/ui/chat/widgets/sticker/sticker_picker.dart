@@ -1,8 +1,6 @@
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import '../../../../stickers/sticker_store.dart' show StickerPack, StickerItem;
-import '../../models/chat_message_models.dart';
 import '../media/media_widgets.dart';
 
 class StickerPickerSheet extends StatefulWidget {
@@ -100,7 +98,10 @@ class _StickerPickerSheetState extends State<StickerPickerSheet> {
                         widget.onPackSelected(index);
                       },
                       child: Container(
-                        margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+                        margin: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 6,
+                        ),
                         padding: const EdgeInsets.all(6),
                         decoration: BoxDecoration(
                           color: selected

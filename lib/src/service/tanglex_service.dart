@@ -15,7 +15,9 @@ class TanglexService {
 
   final TanglexNative _native;
 
-  final ValueNotifier<List<String>> logs = ValueNotifier<List<String>>(<String>[]);
+  final ValueNotifier<List<String>> logs = ValueNotifier<List<String>>(
+    <String>[],
+  );
 
   ReceivePort? _receivePort;
   StreamSubscription<dynamic>? _eventSubscription;
@@ -48,9 +50,7 @@ class TanglexService {
 
       String initResult = '';
       for (var attempt = 0; attempt < 3; attempt++) {
-        initResult = await _native.migrateInitKey(
-          path: pathToUse,
-        );
+        initResult = await _native.migrateInitKey(path: pathToUse);
         if (!_isDbLocked(initResult)) break;
         _appendLog('DB is locked, retrying init (${attempt + 1}/3)...');
         _native.stopEventLoop();
@@ -63,12 +63,11 @@ class TanglexService {
         final hotPath =
             '${docsDir.path}/tanglex_data_hot_${DateTime.now().millisecondsSinceEpoch}';
         _appendLog(
-            'DB still locked. Falling back to temporary data dir: $hotPath');
+          'DB still locked. Falling back to temporary data dir: $hotPath',
+        );
         Directory(hotPath).createSync(recursive: true);
         pathToUse = hotPath;
-        initResult = await _native.migrateInitKey(
-          path: pathToUse,
-        );
+        initResult = await _native.migrateInitKey(path: pathToUse);
         _appendLog('migrateInitKey (hot): $initResult');
       }
       _appendLog('migrateInitKey: $initResult');
@@ -144,8 +143,10 @@ class TanglexService {
   }
 
   /// Get messages in a specific chat
-  Future<List<Map<String, dynamic>>> getChatMessages(String chatRef,
-      {int limit = 50}) async {
+  Future<List<Map<String, dynamic>>> getChatMessages(
+    String chatRef, {
+    int limit = 50,
+  }) async {
     final resp = await sendCommand('/_get chat $chatRef count=$limit');
     if (resp == null) return [];
     try {
@@ -154,7 +155,8 @@ class TanglexService {
       if (result == null) return [];
       final rType = result['type'] as String?;
       final chatObj =
-          (rType == 'apiChat' ? result['chat'] : result) as Map<String, dynamic>?;
+          (rType == 'apiChat' ? result['chat'] : result)
+              as Map<String, dynamic>?;
       if (chatObj == null) return [];
       final items = chatObj['chatItems'] as List?;
       if (items == null) return [];
@@ -173,7 +175,9 @@ class TanglexService {
   }
 
   /// Get pending contact requests
-  Future<List<ContactRequestPreview>> getContactRequests({int limit = 50}) async {
+  Future<List<ContactRequestPreview>> getContactRequests({
+    int limit = 50,
+  }) async {
     final userId = await _getActiveUserId();
     if (userId == null) return [];
     final resp = await sendCommand('/_get chats $userId count=$limit');
@@ -203,14 +207,15 @@ class TanglexService {
   }
 
   /// Send a text message to a contact
-  Future<bool> sendMessage(String chatRef, String text, {int? quotedItemId}) async {
+  Future<bool> sendMessage(
+    String chatRef,
+    String text, {
+    int? quotedItemId,
+  }) async {
     if (quotedItemId != null) {
       final payload = {
         'quotedItemId': quotedItemId,
-        'msgContent': {
-          'type': 'text',
-          'text': text,
-        },
+        'msgContent': {'type': 'text', 'text': text},
       };
       final jsonStr = _jsonCompact([payload]);
       final cmd = '/_send $chatRef json $jsonStr';
@@ -234,7 +239,11 @@ class TanglexService {
     }
   }
 
-  Future<bool> sendImages(String chatRef, List<ImagePayload> images, {int? quotedItemId}) async {
+  Future<bool> sendImages(
+    String chatRef,
+    List<ImagePayload> images, {
+    int? quotedItemId,
+  }) async {
     if (images.isEmpty) return false;
     final composed = <Map<String, dynamic>>[];
     for (int i = 0; i < images.length; i++) {
@@ -244,8 +253,9 @@ class TanglexService {
         'msgContent': {
           'type': 'image',
           'text': '',
-          'image': 'data:${img.previewMime};base64,${base64Encode(img.previewBytes)}',
-        }
+          'image':
+              'data:${img.previewMime};base64,${base64Encode(img.previewBytes)}',
+        },
       };
       if (i == 0 && quotedItemId != null) {
         payload['quotedItemId'] = quotedItemId;
@@ -266,8 +276,8 @@ class TanglexService {
               'text': '',
               'image':
                   'data:${img.previewMime};base64,${base64Encode(img.previewBytes)}',
-            }
-          }
+            },
+          },
         ]);
         final partCmd = '/_send $chatRef json $part';
         final partResp = await sendCommand(partCmd);
@@ -305,10 +315,7 @@ class TanglexService {
     final payload = {
       'filePath': filePath,
       if (quotedItemId != null) 'quotedItemId': quotedItemId,
-      'msgContent': {
-        'type': 'file',
-        'text': text,
-      },
+      'msgContent': {'type': 'file', 'text': text},
     };
     final jsonStr = _jsonCompact([payload]);
     final cmd = '/_send $chatRef json $jsonStr';
@@ -384,6 +391,35 @@ class TanglexService {
     }
   }
 
+  Future<SendResult> sendVoice({
+    required String chatRef,
+    required String filePath,
+    required int durationSec,
+    int? quotedItemId,
+  }) async {
+    final payload = {
+      'filePath': filePath,
+      if (quotedItemId != null) 'quotedItemId': quotedItemId,
+      'msgContent': {'type': 'voice', 'text': '', 'duration': durationSec},
+    };
+    final jsonStr = _jsonCompact([payload]);
+    final cmd = '/_send $chatRef json $jsonStr';
+    final resp = await sendCommand(cmd);
+    if (resp == null) {
+      return const SendResult(ok: false, error: 'no response');
+    }
+    try {
+      final json = Map<String, dynamic>.from(_decodeJson(resp));
+      if (json['result'] != null) return const SendResult(ok: true);
+      if (json['error'] != null) {
+        return SendResult(ok: false, error: _jsonCompact(json['error']));
+      }
+      return const SendResult(ok: false, error: 'unknown response');
+    } catch (_) {
+      return const SendResult(ok: false, error: 'parse error');
+    }
+  }
+
   Future<SendResult> sendSticker({
     required String chatRef,
     required String filePath,
@@ -398,8 +434,7 @@ class TanglexService {
       final ts = DateTime.now().millisecondsSinceEpoch;
       final isWebmSrc = filePath.toLowerCase().endsWith('.webm');
       final ext = isWebmSrc ? 'webm' : 'webp';
-      final target =
-          File('${tmp.path}/st__${packId}__${stickerId}__$ts.$ext');
+      final target = File('${tmp.path}/st__${packId}__${stickerId}__$ts.$ext');
       final src = File(filePath);
       if (await src.exists()) {
         await src.copy(target.path);
@@ -525,15 +560,17 @@ class TanglexService {
         final user = result['user'] as Map<String, dynamic>;
         _activeUserId = user['userId'] as int?;
         // Save profile locally
-        await saveProfileData(ProfileData(
-          displayName: displayName,
-          fullName: fullName,
-          shortDescr: shortDescr ?? '',
-          userId: user['userId'] as int?,
-          agentUserId: user['agentUserId'] as String?,
-          userContactId: user['userContactId'] as int?,
-          localDisplayName: user['localDisplayName'] as String?,
-        ));
+        await saveProfileData(
+          ProfileData(
+            displayName: displayName,
+            fullName: fullName,
+            shortDescr: shortDescr ?? '',
+            userId: user['userId'] as int?,
+            agentUserId: user['agentUserId'] as String?,
+            userContactId: user['userContactId'] as int?,
+            localDisplayName: user['localDisplayName'] as String?,
+          ),
+        );
         return result;
       }
       return json;
@@ -616,8 +653,9 @@ class TanglexService {
         if (errorCode == 'duplicateContactLink') {
           return _getExistingAddress();
         }
-        final message =
-            errorType is Map ? (errorType['message'] ?? errorType['type']) : errorObj;
+        final message = errorType is Map
+            ? (errorType['message'] ?? errorType['type'])
+            : errorObj;
         _appendLog('createConnectionLink error: $message');
         return null;
       }
@@ -632,7 +670,8 @@ class TanglexService {
       String? link;
       final connLinkContact = result['connLinkContact'];
       if (connLinkContact is Map) {
-        link = connLinkContact['connFullLink'] as String? ??
+        link =
+            connLinkContact['connFullLink'] as String? ??
             connLinkContact['connShortLink'] as String?;
       }
       link ??= result['connReqContactLink'] as String?;
@@ -644,7 +683,9 @@ class TanglexService {
         return link;
       }
 
-      _appendLog('createConnectionLink: no link field in result, type=${result['type']}');
+      _appendLog(
+        'createConnectionLink: no link field in result, type=${result['type']}',
+      );
       return null;
     } catch (e) {
       _appendLog('createConnectionLink parse error: $e');
@@ -856,7 +897,9 @@ class TanglexService {
           await createUserProfile(
             displayName: persisted.displayName,
             fullName: persisted.fullName,
-            shortDescr: persisted.shortDescr.isEmpty ? null : persisted.shortDescr,
+            shortDescr: persisted.shortDescr.isEmpty
+                ? null
+                : persisted.shortDescr,
           );
         }
         return;
@@ -879,10 +922,12 @@ class TanglexService {
         }
       }
 
-      final fallbackUserInfo =
-          users.first is Map ? (users.first as Map)['user'] : null;
-      final fallbackUserId =
-          fallbackUserInfo is Map ? fallbackUserInfo['userId'] as int? : null;
+      final fallbackUserInfo = users.first is Map
+          ? (users.first as Map)['user']
+          : null;
+      final fallbackUserId = fallbackUserInfo is Map
+          ? fallbackUserInfo['userId'] as int?
+          : null;
 
       final userIdToActivate = matchedUserId ?? fallbackUserId;
       if (userIdToActivate != null) {
@@ -917,13 +962,17 @@ class TanglexService {
   }
 
   Future<void> _setAppFilePaths() async {
-    if (!Platform.isAndroid) return;
+    if (!Platform.isAndroid && !Platform.isLinux) return;
 
     final docsDir = await getApplicationDocumentsDirectory();
     final tempDir = await getTemporaryDirectory();
 
-    final filesDir = '${docsDir.path}/files';
-    final assetsDir = docsDir.path;
+    final filesDir = Platform.isAndroid
+        ? '${docsDir.path}/files'
+        : '${docsDir.path}/TangleX/files';
+    final assetsDir = Platform.isAndroid
+        ? docsDir.path
+        : '${docsDir.path}/TangleX/assets';
 
     Directory(filesDir).createSync(recursive: true);
     Directory(tempDir.path).createSync(recursive: true);
@@ -969,10 +1018,6 @@ class TanglexService {
 
   String _jsonCompact(dynamic obj) {
     return jsonEncode(obj);
-  }
-
-  String _escapeJson(String s) {
-    return s.replaceAll('"', '\\"').replaceAll('\n', '\\n');
   }
 
   String _escapeText(String s) {

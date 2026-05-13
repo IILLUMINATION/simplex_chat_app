@@ -20,7 +20,8 @@ class TanglexNative {
     : _providedLibrary = dynamicLibrary;
 
   final ffi.DynamicLibrary? _providedLibrary;
-  late final ffi.DynamicLibrary _library = _providedLibrary ?? _openDynamicLibrary();
+  late final ffi.DynamicLibrary _library =
+      _providedLibrary ?? _openDynamicLibrary();
   late final TanglexBindings _bindings = TanglexBindings(_library);
 
   static bool _hsInitialized = false;
@@ -59,7 +60,10 @@ class TanglexNative {
   ///
   /// [confirm] must be one of: 'yesUp', 'yesUpDown', or 'error'.
   /// This is a migration confirmation, NOT a password confirmation.
-  Future<String> migrateInitKey({required String path, String confirm = 'yesUp'}) async {
+  Future<String> migrateInitKey({
+    required String path,
+    String confirm = 'yesUp',
+  }) async {
     await init();
 
     const strongPass = 'Tanglex_Strong_Password_12345!!!';
@@ -69,7 +73,9 @@ class TanglexNative {
     final ctrlOut = calloc<chat_ctrl>();
 
     try {
-      print('Calling Haskell: path=$path, pass=$strongPass, confirm=$confirm, keepKey=0');
+      print(
+        'Calling Haskell: path=$path, pass=$strongPass, confirm=$confirm, keepKey=0',
+      );
       final resultPtr = _bindings.chat_migrate_init_key(
         pathPtr.cast<ffi.Char>(),
         passPtr.cast<ffi.Char>(),
@@ -111,22 +117,24 @@ class TanglexNative {
   /// Uses [Future.microtask] so call site is async-friendly and does not block
   /// UI scheduling directly.
   Future<String> sendCommand(String jsonCmd, {int retryNum = 0}) {
-    return init().then((_) => Future<String>.microtask(() {
-      final ctrl = _requireChatController();
-      final cmdPtr = jsonCmd.toNativeUtf8();
+    return init().then(
+      (_) => Future<String>.microtask(() {
+        final ctrl = _requireChatController();
+        final cmdPtr = jsonCmd.toNativeUtf8();
 
-      try {
-        final resultPtr = _bindings.chat_send_cmd_retry(
-          ctrl,
-          cmdPtr.cast<ffi.Char>(),
-          retryNum,
-        );
+        try {
+          final resultPtr = _bindings.chat_send_cmd_retry(
+            ctrl,
+            cmdPtr.cast<ffi.Char>(),
+            retryNum,
+          );
 
-        return _takeCStringAndFreeStatic(resultPtr);
-      } finally {
-        malloc.free(cmdPtr);
-      }
-    }));
+          return _takeCStringAndFreeStatic(resultPtr);
+        } finally {
+          malloc.free(cmdPtr);
+        }
+      }),
+    );
   }
 
   /// Starts blocking receive loop in a dedicated isolate.
@@ -169,8 +177,34 @@ class TanglexNative {
     if (Platform.isAndroid) {
       return ffi.DynamicLibrary.open('libsimplex.so');
     }
+    if (Platform.isLinux) {
+      // На Linux библиотека libHSsimplex-chat-*.so лежит в lib/ рядом с бинарником
+      // Flutter Linux bundle помещает ресурсы в data/flutter_assets/, но нативные .so
+      // должны быть в lib/ относительно исполняемого файла.
+      try {
+        return ffi.DynamicLibrary.open('lib/libsimplex.so');
+      } catch (e) {
+        // Пробуем другие варианты
+        final possiblePaths = [
+          'libsimplex.so',
+          'lib/x86_64-linux-gnu/libsimplex.so',
+        ];
+        for (final path in possiblePaths) {
+          try {
+            return ffi.DynamicLibrary.open(path);
+          } catch (_) {}
+        }
+        throw UnsupportedError(
+          'Не удалось найти libsimplex.so на Linux. '
+          'Убедитесь, что файлы из simplex_extracted/opt/simplex/lib/app/resources/ '
+          'скопированы в lib/ вашего Linux бандла.',
+        );
+      }
+    }
 
-    throw UnsupportedError('TanglexNative is configured only for Android now.');
+    throw UnsupportedError(
+      'TanglexNative поддерживает только Android и Linux.',
+    );
   }
 
   static String _takeCStringAndFreeStatic(ffi.Pointer<ffi.Char> ptr) {

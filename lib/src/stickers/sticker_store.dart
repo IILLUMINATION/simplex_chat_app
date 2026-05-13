@@ -16,10 +16,10 @@ class StickerItem {
   });
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'filePath': filePath,
-        'animated': animated,
-      };
+    'id': id,
+    'filePath': filePath,
+    'animated': animated,
+  };
 
   static StickerItem fromJson(Map<String, dynamic> json) {
     return StickerItem(
@@ -46,12 +46,12 @@ class StickerPack {
   });
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'name': name,
-        'author': author,
-        'coverPath': coverPath,
-        'stickers': stickers.map((s) => s.toJson()).toList(),
-      };
+    'id': id,
+    'name': name,
+    'author': author,
+    'coverPath': coverPath,
+    'stickers': stickers.map((s) => s.toJson()).toList(),
+  };
 
   static StickerPack fromJson(Map<String, dynamic> json) {
     final list = (json['stickers'] as List? ?? [])
@@ -141,11 +141,9 @@ class StickerStore {
                 final f = item['file']?.toString() ?? '';
                 if (id.isNotEmpty && f.isNotEmpty) {
                   // actual file path resolved after extracting
-                  stickers.add(StickerItem(
-                    id: id,
-                    filePath: f,
-                    animated: true,
-                  ));
+                  stickers.add(
+                    StickerItem(id: id, filePath: f, animated: true),
+                  );
                 }
               }
             }
@@ -167,18 +165,12 @@ class StickerStore {
       }
 
       // resolve sticker paths
-      final resolved = stickers
-          .map((s) {
-            final path = '${packDir.path}/${s.filePath}';
-            final lower = path.toLowerCase();
-            final animated = lower.endsWith('.webm') || lower.endsWith('.webp');
-            return StickerItem(
-              id: s.id,
-              filePath: path,
-              animated: animated,
-            );
-          })
-          .toList();
+      final resolved = stickers.map((s) {
+        final path = '${packDir.path}/${s.filePath}';
+        final lower = path.toLowerCase();
+        final animated = lower.endsWith('.webm') || lower.endsWith('.webp');
+        return StickerItem(id: s.id, filePath: path, animated: animated);
+      }).toList();
 
       String? coverPath;
       if (coverFile != null) {
@@ -231,11 +223,9 @@ class StickerStore {
         final out = File('${packDir.path}/$id.$ext');
         await src.copy(out.path);
         final animated = ext == 'webm' || ext == 'webp';
-        stickers.add(StickerItem(
-          id: id,
-          filePath: out.path,
-          animated: animated,
-        ));
+        stickers.add(
+          StickerItem(id: id, filePath: out.path, animated: animated),
+        );
         idx++;
       }
       if (stickers.isEmpty) return null;
@@ -259,8 +249,9 @@ class StickerStore {
             .map((s) => {'id': s.id, 'file': s.filePath.split('/').last})
             .toList(),
       };
-      File('${packDir.path}/manifest.json')
-          .writeAsStringSync(jsonEncode(manifest));
+      File(
+        '${packDir.path}/manifest.json',
+      ).writeAsStringSync(jsonEncode(manifest));
       return pack;
     } catch (_) {
       return null;
@@ -288,7 +279,9 @@ class StickerStore {
             .toList(),
       };
       final manifestBytes = utf8.encode(jsonEncode(manifest));
-      archive.addFile(ArchiveFile('manifest.json', manifestBytes.length, manifestBytes));
+      archive.addFile(
+        ArchiveFile('manifest.json', manifestBytes.length, manifestBytes),
+      );
 
       // Add sticker files
       for (final sticker in pack.stickers) {
@@ -302,7 +295,6 @@ class StickerStore {
 
       // Create zip
       final zipBytes = ZipEncoder().encode(archive);
-      if (zipBytes == null) return null;
 
       // Save to Downloads or temp dir
       final outDir = Directory('/storage/emulated/0/Download').existsSync()

@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
@@ -61,23 +59,24 @@ class MessageBubble extends StatelessWidget {
     final fromMe = message.fromMe;
     final status = message.status;
     final timeStr = message.timeStr;
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
 
     final incomingBubble = const Color(0xFF191919);
     final outgoingBubble = const Color(0xFF191919);
     final textPrimary = const Color(0xFFE8E8E8);
     final textSecondary = const Color(0xFF808080);
 
-    final isVideoOnly = message.images.length == 1 &&
+    final isVideoOnly =
+        message.images.length == 1 &&
         message.images.first.isVideo &&
         message.images.first.isCircle &&
         text.isEmpty;
-    final isStickerOnly = message.images.length == 1 &&
+    final isStickerOnly =
+        message.images.length == 1 &&
         message.images.first.isSticker &&
         text.isEmpty;
     final hasSticker = message.images.any((e) => e.isSticker);
-    final isBigEmoji = text.isNotEmpty &&
+    final isBigEmoji =
+        text.isNotEmpty &&
         !hasSticker &&
         message.images.isEmpty &&
         _isOnlyEmojis(text);
@@ -92,14 +91,16 @@ class MessageBubble extends StatelessWidget {
         enabled: onSwipeReply != null,
         fromMe: fromMe,
         onReply: onSwipeReply,
-        onLongPressStart: onLongPress == null ? null : (d) => onLongPress!(d, context),
+        onLongPressStart: onLongPress == null
+            ? null
+            : (d) => onLongPress!(d, context),
         child: Container(
           margin: const EdgeInsets.symmetric(vertical: 2, horizontal: 6),
           padding: isVideoOnly || isStickerOnly
               ? const EdgeInsets.all(2)
               : (hasSticker
-                  ? const EdgeInsets.all(4)
-                  : const EdgeInsets.symmetric(horizontal: 12, vertical: 8)),
+                    ? const EdgeInsets.all(4)
+                    : const EdgeInsets.symmetric(horizontal: 12, vertical: 8)),
           constraints: BoxConstraints(
             maxWidth: MediaQuery.of(context).size.width * 0.78,
           ),
@@ -124,8 +125,9 @@ class MessageBubble extends StatelessWidget {
                   ],
           ),
           child: Column(
-            crossAxisAlignment:
-                fromMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+            crossAxisAlignment: fromMe
+                ? CrossAxisAlignment.end
+                : CrossAxisAlignment.start,
             children: [
               if (message.fileName != null && message.audio == null) ...[
                 FileAttachment(
@@ -230,29 +232,19 @@ class MessageBubble extends StatelessWidget {
                         text,
                         style: const TextStyle(fontSize: 48, height: 1.1),
                       )
-                    : MarkdownTextWidget(
-                        text: text,
-                        textColor: textPrimary,
-                      ),
+                    : MarkdownTextWidget(text: text, textColor: textPrimary),
               if (!isBigEmoji) const SizedBox(height: 4),
               Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   if (isPinned) ...[
-                    Icon(
-                      Icons.push_pin,
-                      size: 10,
-                      color: textSecondary,
-                    ),
+                    Icon(Icons.push_pin, size: 10, color: textSecondary),
                     const SizedBox(width: 2),
                   ],
                   if (timeStr.isNotEmpty)
                     Text(
                       timeStr,
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: textSecondary,
-                      ),
+                      style: TextStyle(fontSize: 11, color: textSecondary),
                     ),
                   if (status.isNotEmpty) ...[
                     const SizedBox(width: 4),
@@ -309,7 +301,8 @@ class SwipeReplyWrapper extends StatefulWidget {
   State<SwipeReplyWrapper> createState() => _SwipeReplyWrapperState();
 }
 
-class _SwipeReplyWrapperState extends State<SwipeReplyWrapper> with SingleTickerProviderStateMixin {
+class _SwipeReplyWrapperState extends State<SwipeReplyWrapper>
+    with SingleTickerProviderStateMixin {
   static const double _maxOffset = -64;
   static const double _triggerOffset = -48;
   double _offset = 0;
@@ -320,14 +313,20 @@ class _SwipeReplyWrapperState extends State<SwipeReplyWrapper> with SingleTicker
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(vsync: this, duration: const Duration(milliseconds: 180));
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 180),
+    );
   }
 
   void _animateBack() {
     final begin = _offset;
     _offset = 0;
     _controller.reset();
-    _anim = Tween<double>(begin: begin, end: 0).chain(CurveTween(curve: Curves.easeOut)).animate(_controller);
+    _anim = Tween<double>(
+      begin: begin,
+      end: 0,
+    ).chain(CurveTween(curve: Curves.easeOut)).animate(_controller);
     _controller.forward(from: 0);
   }
 
@@ -339,58 +338,62 @@ class _SwipeReplyWrapperState extends State<SwipeReplyWrapper> with SingleTicker
         final offset = _controller.isAnimating ? _anim.value : _offset;
         final showReply = offset.abs() > 8;
         return GestureDetector(
-      behavior: HitTestBehavior.translucent,
-      onLongPressStart: widget.onLongPressStart,
-      onHorizontalDragUpdate: widget.enabled
-          ? (d) {
-              final delta = d.delta.dx;
-              if (delta >= 0 && _offset >= 0) return;
-              final next = (_offset + delta).clamp(_maxOffset, 0.0);
-              if (next <= _triggerOffset && !_triggered) {
-                _triggered = true;
-                HapticFeedback.selectionClick();
-              }
-              setState(() {
-                _offset = next;
-              });
-            }
-          : null,
-      onHorizontalDragEnd: widget.enabled
-          ? (_) {
-              final shouldReply = _offset <= _triggerOffset;
-              _animateBack();
-              if (shouldReply) widget.onReply?.call();
-              _triggered = false;
-            }
-          : null,
-      onHorizontalDragCancel: widget.enabled
-          ? () {
-              _animateBack();
-              _triggered = false;
-            }
-          : null,
-      child: Stack(
-        alignment: Alignment.centerRight,
-        children: [
-          if (showReply)
-            Positioned(
-              right: 6,
-              child: Container(
-                width: 26,
-                height: 26,
-                decoration: const BoxDecoration(
-                  color: Color(0xFF2A2A2A),
-                  shape: BoxShape.circle,
+          behavior: HitTestBehavior.translucent,
+          onLongPressStart: widget.onLongPressStart,
+          onHorizontalDragUpdate: widget.enabled
+              ? (d) {
+                  final delta = d.delta.dx;
+                  if (delta >= 0 && _offset >= 0) return;
+                  final next = (_offset + delta).clamp(_maxOffset, 0.0);
+                  if (next <= _triggerOffset && !_triggered) {
+                    _triggered = true;
+                    HapticFeedback.selectionClick();
+                  }
+                  setState(() {
+                    _offset = next;
+                  });
+                }
+              : null,
+          onHorizontalDragEnd: widget.enabled
+              ? (_) {
+                  final shouldReply = _offset <= _triggerOffset;
+                  _animateBack();
+                  if (shouldReply) widget.onReply?.call();
+                  _triggered = false;
+                }
+              : null,
+          onHorizontalDragCancel: widget.enabled
+              ? () {
+                  _animateBack();
+                  _triggered = false;
+                }
+              : null,
+          child: Stack(
+            alignment: Alignment.centerRight,
+            children: [
+              if (showReply)
+                Positioned(
+                  right: 6,
+                  child: Container(
+                    width: 26,
+                    height: 26,
+                    decoration: const BoxDecoration(
+                      color: Color(0xFF2A2A2A),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.reply,
+                      size: 14,
+                      color: Color(0xFF8AB4F8),
+                    ),
+                  ),
                 ),
-                child: const Icon(Icons.reply, size: 14, color: Color(0xFF8AB4F8)),
+              Transform.translate(
+                offset: Offset(offset, 0),
+                child: widget.child,
               ),
-            ),
-          Transform.translate(
-            offset: Offset(offset, 0),
-            child: widget.child,
+            ],
           ),
-        ],
-      ),
         );
       },
     );
@@ -444,13 +447,23 @@ class MarkdownTextWidget extends StatelessWidget {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final codeBg = isDark ? const Color(0xFF181818) : const Color(0xFFF0F0F0);
-    final borderColor = isDark ? const Color(0xFF2A2A2A) : const Color(0xFFE0E0E0);
-    final linkColor = isDark ? const Color(0xFF6CB4EE) : const Color(0xFF2B7DE9);
+    final borderColor = isDark
+        ? const Color(0xFF2A2A2A)
+        : const Color(0xFFE0E0E0);
+    final linkColor = isDark
+        ? const Color(0xFF6CB4EE)
+        : const Color(0xFF2B7DE9);
     final quoteBg = isDark ? const Color(0xFF1A1D23) : const Color(0xFFF5F7FA);
-    final quoteBorder = isDark ? const Color(0xFF4A6FA5) : const Color(0xFF5A9CF5);
-    final inlineCodeBg = isDark ? const Color(0xFF252526) : const Color(0xFFECECEC);
+    final quoteBorder = isDark
+        ? const Color(0xFF4A6FA5)
+        : const Color(0xFF5A9CF5);
+    final inlineCodeBg = isDark
+        ? const Color(0xFF252526)
+        : const Color(0xFFECECEC);
     final hrColor = isDark ? const Color(0xFF2A2A2A) : const Color(0xFFE0E0E0);
-    final headingColor = isDark ? const Color(0xFFE8E8E8) : const Color(0xFF1A1A1A);
+    final headingColor = isDark
+        ? const Color(0xFFE8E8E8)
+        : const Color(0xFF1A1A1A);
     const baseFontSize = 14.0;
 
     final baseStyle = TextStyle(
@@ -460,10 +473,15 @@ class MarkdownTextWidget extends StatelessWidget {
       fontFamily: '.AppleSystemUIFont',
     );
 
+    final normalizedText = text.replaceAll('\r\n', '\n');
+    final cleanedText = normalizedText
+        .replaceAll(RegExp(r'^\n+'), '')
+        .replaceAll(RegExp(r'\n+$'), '');
     return MarkdownBody(
-      data: text,
+      data: cleanedText,
       selectable: true,
       softLineBreak: true,
+      extensionSet: md.ExtensionSet.gitHubFlavored,
       onTapLink: (text, href, title) async {
         if (href == null) return;
         final uri = Uri.tryParse(href);
@@ -513,7 +531,10 @@ class MarkdownTextWidget extends StatelessWidget {
           fontSize: baseFontSize - 0.5,
           fontWeight: FontWeight.w500,
         ),
-        codeblockPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        codeblockPadding: const EdgeInsets.symmetric(
+          horizontal: 14,
+          vertical: 12,
+        ),
         codeblockDecoration: BoxDecoration(
           color: codeBg,
           borderRadius: BorderRadius.circular(10),
@@ -523,13 +544,16 @@ class MarkdownTextWidget extends StatelessWidget {
           color: textColor.withOpacity(0.7),
           fontStyle: FontStyle.italic,
         ),
-        blockquotePadding: const EdgeInsets.only(left: 12, right: 8, top: 4, bottom: 4),
+        blockquotePadding: const EdgeInsets.only(
+          left: 12,
+          right: 8,
+          top: 4,
+          bottom: 4,
+        ),
         blockquoteDecoration: BoxDecoration(
           color: quoteBg,
           borderRadius: BorderRadius.circular(6),
-          border: Border(
-            left: BorderSide(color: quoteBorder, width: 3),
-          ),
+          border: Border(left: BorderSide(color: quoteBorder, width: 3)),
         ),
         listBullet: baseStyle.copyWith(
           fontWeight: FontWeight.w700,
@@ -546,11 +570,12 @@ class MarkdownTextWidget extends StatelessWidget {
         ),
         tableBorder: TableBorder.all(color: borderColor, width: 1),
         tableColumnWidth: const FlexColumnWidth(),
-        tableCellsPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        tableCellsPadding: const EdgeInsets.symmetric(
+          horizontal: 10,
+          vertical: 6,
+        ),
       ),
-      builders: {
-        'code': CodeBlockBuilder(codeBg, textColor, theme),
-      },
+      builders: {'pre': CodeBlockBuilder(codeBg, textColor, theme)},
     );
   }
 }
@@ -564,11 +589,18 @@ class CodeBlockBuilder extends MarkdownElementBuilder {
 
   @override
   Widget? visitElementAfter(md.Element element, TextStyle? preferredStyle) {
-    final codeText = element.textContent;
+    md.Element? codeElement;
+    for (final child in element.children ?? const []) {
+      if (child is md.Element && child.tag == 'code') {
+        codeElement = child;
+        break;
+      }
+    }
+    final codeText = (codeElement ?? element).textContent;
     if (codeText.isEmpty) return null;
 
     String? language;
-    final classes = element.attributes['class'];
+    final classes = codeElement?.attributes['class'];
     if (classes != null) {
       final match = RegExp(r'language-(\w+)').firstMatch(classes);
       language = match?.group(1);
@@ -577,7 +609,7 @@ class CodeBlockBuilder extends MarkdownElementBuilder {
     Widget codeWidget;
     if (language != null) {
       try {
-        final result = highlight.highlight.parse(codeText.trim(), language: language);
+        highlight.highlight.parse(codeText.trim(), language: language);
         codeWidget = HighlightedCodeBlock(
           text: codeText.trim(),
           language: language,
@@ -625,13 +657,17 @@ class HighlightedCodeBlock extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final result = highlight.highlight.parse(text, language: language);
-    final spans = _buildSpans(result?.nodes ?? [], theme);
+    final spans = _buildSpans(result.nodes ?? [], theme);
     final langLabel = language.toUpperCase();
     return Container(
       decoration: BoxDecoration(
         color: codeBg,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: theme.brightness == Brightness.dark ? const Color(0xFF2A2A2A) : const Color(0xFFE0E0E0)),
+        border: Border.all(
+          color: theme.brightness == Brightness.dark
+              ? const Color(0xFF2A2A2A)
+              : const Color(0xFFE0E0E0),
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -650,7 +686,9 @@ class HighlightedCodeBlock extends StatelessWidget {
           ),
           Container(
             height: 1,
-            color: theme.brightness == Brightness.dark ? const Color(0xFF2A2A2A) : const Color(0xFFE0E0E0),
+            color: theme.brightness == Brightness.dark
+                ? const Color(0xFF2A2A2A)
+                : const Color(0xFFE0E0E0),
           ),
           Padding(
             padding: const EdgeInsets.all(12),
@@ -688,14 +726,16 @@ class HighlightedCodeBlock extends StatelessWidget {
     };
     for (final node in nodes) {
       if (node.value != null) {
-        spans.add(TextSpan(
-          text: node.value,
-          style: TextStyle(
-            color: node.className != null
-                ? (colorMap[node.className] ?? textColor)
-                : textColor,
+        spans.add(
+          TextSpan(
+            text: node.value,
+            style: TextStyle(
+              color: node.className != null
+                  ? (colorMap[node.className] ?? textColor)
+                  : textColor,
+            ),
           ),
-        ));
+        );
       } else if (node.children != null) {
         spans.addAll(_buildSpans(node.children!, theme));
       }
@@ -722,7 +762,9 @@ class SimpleCodeBlock extends StatelessWidget {
       decoration: BoxDecoration(
         color: codeBg,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: isDark ? const Color(0xFF2A2A2A) : const Color(0xFFE0E0E0)),
+        border: Border.all(
+          color: isDark ? const Color(0xFF2A2A2A) : const Color(0xFFE0E0E0),
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -865,15 +907,42 @@ class FileAttachment extends StatelessWidget {
   IconData _fileIcon() {
     final lower = fileName.toLowerCase();
     if (lower.endsWith('.pdf')) return Icons.picture_as_pdf;
-    if (lower.endsWith('.zip') || lower.endsWith('.sxpz') || lower.endsWith('.rar') || lower.endsWith('.7z') || lower.endsWith('.tar') || lower.endsWith('.gz')) return Icons.folder_zip;
-    if (lower.endsWith('.doc') || lower.endsWith('.docx')) return Icons.description;
-    if (lower.endsWith('.xls') || lower.endsWith('.xlsx')) return Icons.table_chart;
-    if (lower.endsWith('.ppt') || lower.endsWith('.pptx')) return Icons.slideshow;
+    if (lower.endsWith('.zip') ||
+        lower.endsWith('.sxpz') ||
+        lower.endsWith('.rar') ||
+        lower.endsWith('.7z') ||
+        lower.endsWith('.tar') ||
+        lower.endsWith('.gz'))
+      return Icons.folder_zip;
+    if (lower.endsWith('.doc') || lower.endsWith('.docx'))
+      return Icons.description;
+    if (lower.endsWith('.xls') || lower.endsWith('.xlsx'))
+      return Icons.table_chart;
+    if (lower.endsWith('.ppt') || lower.endsWith('.pptx'))
+      return Icons.slideshow;
     if (lower.endsWith('.txt')) return Icons.text_snippet;
     if (lower.endsWith('.apk')) return Icons.android;
-    if (lower.endsWith('.mp3') || lower.endsWith('.ogg') || lower.endsWith('.wav') || lower.endsWith('.flac') || lower.endsWith('.aac') || lower.endsWith('.m4a')) return Icons.audiotrack;
-    if (lower.endsWith('.mp4') || lower.endsWith('.mkv') || lower.endsWith('.avi') || lower.endsWith('.mov') || lower.endsWith('.webm')) return Icons.movie;
-    if (lower.endsWith('.jpg') || lower.endsWith('.jpeg') || lower.endsWith('.png') || lower.endsWith('.gif') || lower.endsWith('.webp') || lower.endsWith('.svg') || lower.endsWith('.bmp')) return Icons.image;
+    if (lower.endsWith('.mp3') ||
+        lower.endsWith('.ogg') ||
+        lower.endsWith('.wav') ||
+        lower.endsWith('.flac') ||
+        lower.endsWith('.aac') ||
+        lower.endsWith('.m4a'))
+      return Icons.audiotrack;
+    if (lower.endsWith('.mp4') ||
+        lower.endsWith('.mkv') ||
+        lower.endsWith('.avi') ||
+        lower.endsWith('.mov') ||
+        lower.endsWith('.webm'))
+      return Icons.movie;
+    if (lower.endsWith('.jpg') ||
+        lower.endsWith('.jpeg') ||
+        lower.endsWith('.png') ||
+        lower.endsWith('.gif') ||
+        lower.endsWith('.webp') ||
+        lower.endsWith('.svg') ||
+        lower.endsWith('.bmp'))
+      return Icons.image;
     return Icons.insert_drive_file;
   }
 
@@ -887,19 +956,26 @@ class FileAttachment extends StatelessWidget {
 
     final isIncoming = !fromMe;
     final hasLocal = filePath != null && filePath!.isNotEmpty;
-    final awaitingSender = isIncoming &&
+    final awaitingSender =
+        isIncoming &&
         !hasLocal &&
         fileStatusType == 'rcvInvitation' &&
         fileSize == null;
-    final needsDownload = isIncoming &&
+    final needsDownload =
+        isIncoming &&
         !hasLocal &&
         fileId != null &&
         fileStatusType == 'rcvInvitation' &&
         !awaitingSender;
     final isDownloading =
-        isIncoming && !hasLocal && (fileStatusType == 'rcvTransfer' || fileStatusType == 'rcvAccepted');
-    final showProgress = transferProgress != null && transferTotal != null && transferTotal! > 0;
-    final progress = showProgress ? (transferProgress! / transferTotal!).clamp(0.0, 1.0) : null;
+        isIncoming &&
+        !hasLocal &&
+        (fileStatusType == 'rcvTransfer' || fileStatusType == 'rcvAccepted');
+    final showProgress =
+        transferProgress != null && transferTotal != null && transferTotal! > 0;
+    final progress = showProgress
+        ? (transferProgress! / transferTotal!).clamp(0.0, 1.0)
+        : null;
 
     Future<void> openFile() async {
       if (!hasLocal) return;
@@ -907,7 +983,9 @@ class FileAttachment extends StatelessWidget {
         final result = await OpenFilex.open(filePath!);
         if (result.type != ResultType.done && context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Не удалось открыть файл: ${result.message ?? result.type}')),
+            SnackBar(
+              content: Text('Не удалось открыть файл: ${result.message}'),
+            ),
           );
         }
       } on MissingPluginException {
@@ -937,10 +1015,7 @@ class FileAttachment extends StatelessWidget {
         decoration: BoxDecoration(
           color: containerBg,
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(
-            color: const Color(0xFF333333),
-            width: 1,
-          ),
+          border: Border.all(color: const Color(0xFF333333), width: 1),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -975,19 +1050,13 @@ class FileAttachment extends StatelessWidget {
                     const SizedBox(height: 2),
                     Text(
                       'Ожидает отправителя',
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: sizeColor,
-                      ),
+                      style: TextStyle(fontSize: 11, color: sizeColor),
                     ),
                   ] else if (fileSize != null) ...[
                     const SizedBox(height: 2),
                     Text(
                       _formatSize(fileSize!),
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: sizeColor,
-                      ),
+                      style: TextStyle(fontSize: 11, color: sizeColor),
                     ),
                   ],
                 ],
@@ -995,7 +1064,11 @@ class FileAttachment extends StatelessWidget {
             ),
             const SizedBox(width: 4),
             if (awaitingSender)
-              const Icon(Icons.hourglass_empty, size: 18, color: Color(0xFF8AB4F8))
+              const Icon(
+                Icons.hourglass_empty,
+                size: 18,
+                color: Color(0xFF8AB4F8),
+              )
             else if (needsDownload)
               IconButton(
                 icon: Icon(Icons.download, size: 20, color: fileIconColor),
@@ -1147,8 +1220,6 @@ class _PinnedBarState extends State<PinnedBar> {
   Widget build(BuildContext context) {
     _syncCurrentPage();
 
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
     final pins = widget.pinned;
     if (pins.isEmpty) return const SizedBox.shrink();
 
@@ -1163,11 +1234,7 @@ class _PinnedBarState extends State<PinnedBar> {
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
           color: const Color(0xFF111111),
-          border: Border(
-            bottom: BorderSide(
-              color: const Color(0xFF333333),
-            ),
-          ),
+          border: Border(bottom: BorderSide(color: const Color(0xFF333333))),
         ),
         child: Row(
           children: [
@@ -1202,7 +1269,9 @@ class _PinnedBarState extends State<PinnedBar> {
                   const SizedBox(height: 2),
                   Text(
                     pm.text.isNotEmpty
-                        ? (pm.text.length > 80 ? '${pm.text.substring(0, 80)}…' : pm.text)
+                        ? (pm.text.length > 80
+                              ? '${pm.text.substring(0, 80)}…'
+                              : pm.text)
                         : '📷 ${pm.timeStr}',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,

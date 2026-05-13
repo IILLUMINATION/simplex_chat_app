@@ -11,11 +11,10 @@ class ThemeConfigData {
   ThemeConfigData copyWith({String? theme, String? mode}) =>
       ThemeConfigData(theme: theme ?? this.theme, mode: mode ?? this.mode);
   Map<String, dynamic> toJson() => {'theme': theme, 'mode': mode};
-  factory ThemeConfigData.fromJson(Map<String, dynamic> j) =>
-      ThemeConfigData(
-        theme: j['theme'] as String? ?? 'material',
-        mode: j['mode'] as String? ?? 'system',
-      );
+  factory ThemeConfigData.fromJson(Map<String, dynamic> j) => ThemeConfigData(
+    theme: j['theme'] as String? ?? 'material',
+    mode: j['mode'] as String? ?? 'system',
+  );
 }
 
 class AppLocaleData {
@@ -46,24 +45,24 @@ class ProfileData {
   final String? localDisplayName;
 
   Map<String, dynamic> toJson() => {
-        'displayName': displayName,
-        'fullName': fullName,
-        'shortDescr': shortDescr,
-        if (userId != null) 'userId': userId,
-        if (agentUserId != null) 'agentUserId': agentUserId,
-        if (userContactId != null) 'userContactId': userContactId,
-        if (localDisplayName != null) 'localDisplayName': localDisplayName,
-      };
+    'displayName': displayName,
+    'fullName': fullName,
+    'shortDescr': shortDescr,
+    if (userId != null) 'userId': userId,
+    if (agentUserId != null) 'agentUserId': agentUserId,
+    if (userContactId != null) 'userContactId': userContactId,
+    if (localDisplayName != null) 'localDisplayName': localDisplayName,
+  };
 
   factory ProfileData.fromJson(Map<String, dynamic> j) => ProfileData(
-        displayName: j['displayName'] as String? ?? '',
-        fullName: j['fullName'] as String? ?? '',
-        shortDescr: j['shortDescr'] as String? ?? '',
-        userId: j['userId'] as int?,
-        agentUserId: j['agentUserId'] as String?,
-        userContactId: j['userContactId'] as int?,
-        localDisplayName: j['localDisplayName'] as String?,
-      );
+    displayName: j['displayName'] as String? ?? '',
+    fullName: j['fullName'] as String? ?? '',
+    shortDescr: j['shortDescr'] as String? ?? '',
+    userId: j['userId'] as int?,
+    agentUserId: j['agentUserId'] as String?,
+    userContactId: j['userContactId'] as int?,
+    localDisplayName: j['localDisplayName'] as String?,
+  );
 }
 
 /// Parsed chat item from /_get chats response
@@ -79,6 +78,7 @@ class ChatPreview {
     this.contactStatus,
     this.contactUsed,
     this.avatarImage,
+    this.lastFromMe = false,
   });
 
   final String chatRef; // e.g. "@1" or "#1"
@@ -91,24 +91,33 @@ class ChatPreview {
   final String? contactStatus;
   final bool? contactUsed;
   final Uint8List? avatarImage;
+  final bool lastFromMe;
 
   factory ChatPreview.fromJson(Map<String, dynamic> json) {
     final chatInfo = json['chatInfo'] as Map<String, dynamic>? ?? {};
     final chatType = chatInfo['type'] as String?;
     final contact = chatInfo['contact'] as Map<String, dynamic>?;
     final group = chatInfo['group'] as Map<String, dynamic>?;
-    final contactRequest =
-        chatInfo['contactRequest'] as Map<String, dynamic>?;
+    final contactRequest = chatInfo['contactRequest'] as Map<String, dynamic>?;
     final chatItems = json['chatItems'] as List?;
 
     String lastMsg = '';
     int? ts;
+    bool lastFromMe = false;
     if (chatItems != null && chatItems.isNotEmpty) {
-      final lastItem = chatItems.first as Map<String, dynamic>;
-      final content = lastItem['content'] as Map<String, dynamic>?;
-      final text = content?['text'] as String?;
-      if (text != null) lastMsg = text;
-      ts = lastItem['timeStamp'] as int?;
+      final lastItem = _pickLatestChatItem(chatItems);
+      if (lastItem != null) {
+        lastMsg = _previewFromChatItem(lastItem);
+        if (lastMsg.length > 60) {
+          lastMsg = '${lastMsg.substring(0, 57)}...';
+        }
+        ts = _chatItemTimestamp(lastItem);
+        final chatDir = lastItem['chatDir'];
+        if (chatDir is Map) {
+          final dirType = chatDir['type'] as String?;
+          lastFromMe = dirType?.endsWith('Snd') == true;
+        }
+      }
     }
 
     String type;
@@ -121,7 +130,8 @@ class ChatPreview {
     if (chatType == 'contactRequest' && contactRequest != null) {
       type = 'contactRequest';
       final profile = contactRequest['profile'] as Map<String, dynamic>?;
-      name = profile?['displayName'] as String? ??
+      name =
+          profile?['displayName'] as String? ??
           contactRequest['localDisplayName'] as String? ??
           '';
       id = contactRequest['contactRequestId'] as int?;
@@ -129,7 +139,8 @@ class ChatPreview {
       avatar = _decodeImage(img);
     } else if (contact != null) {
       type = 'contact';
-      name = contact['displayName'] as String? ??
+      name =
+          contact['displayName'] as String? ??
           contact['localDisplayName'] as String? ??
           '';
       id = contact['contactId'] as int?;
@@ -140,7 +151,8 @@ class ChatPreview {
       avatar = _decodeImage(img);
     } else if (group != null) {
       type = 'group';
-      name = group['groupName'] as String? ??
+      name =
+          group['groupName'] as String? ??
           group['localDisplayName'] as String? ??
           '';
       id = group['groupId'] as int?;
@@ -165,8 +177,88 @@ class ChatPreview {
       contactStatus: contactStatus,
       contactUsed: contactUsed,
       avatarImage: avatar,
+      lastFromMe: lastFromMe,
     );
   }
+}
+
+Map<String, dynamic>? _pickLatestChatItem(List items) {
+  Map<String, dynamic>? best;
+  int? bestTs;
+  for (final raw in items) {
+    if (raw is! Map) continue;
+    final item = Map<String, dynamic>.from(raw);
+    final ts = _chatItemTimestamp(item);
+    if (best == null) {
+      best = item;
+      bestTs = ts;
+      continue;
+    }
+    if (ts != null && (bestTs == null || ts > bestTs!)) {
+      best = item;
+      bestTs = ts;
+    }
+  }
+  return best;
+}
+
+int? _chatItemTimestamp(Map<String, dynamic> item) {
+  int? ts;
+  final raw = item['itemTs'] ?? item['timeStamp'];
+  ts = _parseTimestamp(raw);
+  if (ts != null) return ts;
+  final meta = item['meta'];
+  if (meta is Map) {
+    ts = _parseTimestamp(meta['itemTs'] ?? meta['timeStamp']);
+  }
+  return ts;
+}
+
+int? _parseTimestamp(dynamic value) {
+  if (value is int) return value;
+  if (value is double) return value.toInt();
+  if (value is String) {
+    try {
+      final dt = DateTime.parse(value).toLocal();
+      return dt.millisecondsSinceEpoch * 1000;
+    } catch (_) {
+      return null;
+    }
+  }
+  return null;
+}
+
+String _previewFromChatItem(Map<String, dynamic> item) {
+  final content = item['content'] as Map<String, dynamic>?;
+  final contentType = content?['type'] as String?;
+  if (contentType == 'chatBanner') {
+    final text = content?['text'] as String?;
+    if (text != null && text.isNotEmpty) return text;
+  }
+  if (contentType == 'sndMsgContent' || contentType == 'rcvMsgContent') {
+    final msgContent = content?['msgContent'] as Map<String, dynamic>?;
+    final msgType = msgContent?['type'] as String?;
+    final text = msgContent?['text'] as String?;
+    if (text != null && text.trim().isNotEmpty) return text.trim();
+    if (msgType == 'image') return 'Фото';
+    if (msgType == 'video') return 'Видео';
+    if (msgType == 'voice') return 'Голосовое';
+    if (msgType == 'sticker') return 'Стикер';
+    if (msgType == 'file') {
+      final file = item['file'] as Map<String, dynamic>?;
+      final name = file?['fileName'] as String?;
+      return name?.isNotEmpty == true ? name! : 'Файл';
+    }
+    if (msgType == 'link') return 'Ссылка';
+    if (msgType == 'report') return 'Отчет';
+    if (msgType == 'chat') return 'Чат';
+  }
+  final meta = item['meta'] as Map<String, dynamic>?;
+  final itemText = meta?['itemText'] as String?;
+  if (itemText != null && itemText.trim().isNotEmpty) return itemText.trim();
+  final fallback = content?['text'] as String?;
+  if (fallback != null && fallback.trim().isNotEmpty) return fallback.trim();
+  return '';
 }
 
 Uint8List? _decodeImage(String? dataUri) {
@@ -176,10 +268,46 @@ Uint8List? _decodeImage(String? dataUri) {
   if (idx == -1) return null;
   final b64 = dataUri.substring(idx + marker.length);
   try {
-    return base64Decode(b64);
+    final bytes = base64Decode(b64);
+    if (!_looksLikeImage(bytes)) return null;
+    return bytes;
   } catch (_) {
     return null;
   }
+}
+
+bool _looksLikeImage(Uint8List bytes) {
+  if (bytes.length < 4) return false;
+  // JPEG
+  if (bytes[0] == 0xFF && bytes[1] == 0xD8) return true;
+  // PNG
+  if (bytes[0] == 0x89 &&
+      bytes[1] == 0x50 &&
+      bytes[2] == 0x4E &&
+      bytes[3] == 0x47) {
+    return true;
+  }
+  // GIF
+  if (bytes[0] == 0x47 &&
+      bytes[1] == 0x49 &&
+      bytes[2] == 0x46) {
+    return true;
+  }
+  // WEBP (RIFF....WEBP)
+  if (bytes.length >= 12 &&
+      bytes[0] == 0x52 &&
+      bytes[1] == 0x49 &&
+      bytes[2] == 0x46 &&
+      bytes[3] == 0x46 &&
+      bytes[8] == 0x57 &&
+      bytes[9] == 0x45 &&
+      bytes[10] == 0x42 &&
+      bytes[11] == 0x50) {
+    return true;
+  }
+  // BMP
+  if (bytes[0] == 0x42 && bytes[1] == 0x4D) return true;
+  return false;
 }
 
 /// Parsed contact info
@@ -198,7 +326,8 @@ class ContactInfo {
     final contact = json['contact'] as Map<String, dynamic>? ?? {};
     return ContactInfo(
       contactId: json['contactId'] as int? ?? contact['contactId'] as int? ?? 0,
-      displayName: contact['displayName'] as String? ??
+      displayName:
+          contact['displayName'] as String? ??
           contact['localDisplayName'] as String? ??
           '',
       status: json['status'] as String? ?? '',
@@ -231,7 +360,8 @@ class ContactRequestPreview {
     return ContactRequestPreview(
       contactRequestId: json['contactRequestId'] as int? ?? 0,
       localDisplayName: json['localDisplayName'] as String? ?? '',
-      displayName: profile['displayName'] as String? ??
+      displayName:
+          profile['displayName'] as String? ??
           json['localDisplayName'] as String? ??
           '',
       fullName: profile['fullName'] as String? ?? '',

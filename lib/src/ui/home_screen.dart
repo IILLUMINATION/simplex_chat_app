@@ -67,7 +67,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       body: const ChatsScreen(),
       floatingActionButton: FloatingActionButton(
         onPressed: () => ref.read(fabActionProvider).trigger(),
-        child: const Icon(Icons.add),
+        backgroundColor: const Color(0xFF5A9CF5),
+        elevation: 4,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.all(Radius.circular(16)),
+        ),
+        child: const Icon(Icons.add, color: Colors.white, size: 28),
       ),
     );
   }
@@ -123,17 +128,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     ),
                   ),
                 ),
-                error: (_, __) => _DrawerProfilePlaceholder(
-                  name: 'Error loading profile',
-                ),
+                error: (_, __) =>
+                    _DrawerProfilePlaceholder(name: 'Error loading profile'),
                 data: (profile) {
                   final dn = profile?.displayName ?? '';
                   final ln = profile?.localDisplayName ?? '';
                   final name = dn.isNotEmpty
                       ? dn
                       : ln.isNotEmpty
-                          ? ln
-                          : 'Profile';
+                      ? ln
+                      : 'Profile';
                   return _DrawerProfilePlaceholder(name: name);
                 },
               ),
@@ -220,15 +224,16 @@ class _DrawerProfilePlaceholder extends StatelessWidget {
                 const SizedBox(height: 2),
                 const Text(
                   'Tap to view profile',
-                  style: TextStyle(
-                    color: Color(0xFF808080),
-                    fontSize: 13,
-                  ),
+                  style: TextStyle(color: Color(0xFF808080), fontSize: 13),
                 ),
               ],
             ),
           ),
-          const Icon(Icons.arrow_forward_ios, size: 14, color: Color(0xFF555555)),
+          const Icon(
+            Icons.arrow_forward_ios,
+            size: 14,
+            color: Color(0xFF555555),
+          ),
         ],
       ),
     );

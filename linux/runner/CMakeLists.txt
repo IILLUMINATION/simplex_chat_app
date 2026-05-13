@@ -24,3 +24,14 @@ target_link_libraries(${BINARY_NAME} PRIVATE flutter)
 target_link_libraries(${BINARY_NAME} PRIVATE PkgConfig::GTK)
 
 target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
+
+# === SimpleX native library ===
+# Копируем libsimplex.so и все Haskell зависимости в bundle
+set(SIMPLEX_LIB_DIR "${CMAKE_CURRENT_SOURCE_DIR}/lib")
+if(EXISTS "${SIMPLEX_LIB_DIR}")
+  # При запуске из build директории добавляем RPATH
+  set_target_properties(${BINARY_NAME} PROPERTIES
+    BUILD_RPATH "${SIMPLEX_LIB_DIR}"
+    INSTALL_RPATH "\$ORIGIN/lib"
+  )
+endif()

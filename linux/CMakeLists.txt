@@ -112,6 +112,16 @@ install(DIRECTORY "${NATIVE_ASSETS_DIR}"
    DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
    COMPONENT Runtime)
 
+# === SimpleX native library (libsimplex.so + Haskell deps) ===
+set(SIMPLEX_LIB_DIR "${CMAKE_SOURCE_DIR}/runner/lib")
+if(EXISTS "${SIMPLEX_LIB_DIR}")
+  install(DIRECTORY "${SIMPLEX_LIB_DIR}/"
+    DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
+    COMPONENT Runtime
+    FILES_MATCHING PATTERN "*.so*"
+  )
+endif()
+
 # Fully re-copy the assets directory on each build to avoid having stale files
 # from a previous install.
 set(FLUTTER_ASSET_DIR_NAME "flutter_assets")
