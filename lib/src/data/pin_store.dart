@@ -50,6 +50,13 @@ class PinStore {
   // chatRef -> список закреплённых сообщений
   final Map<String, List<PinnedMessage>> _pinned = {};
 
+  /// Сериализует все мутации (pin/unpin/save) чтобы:
+  ///  1) не было гонок (последовательный last-write-wins → потеря данных),
+  ///  2) load() гарантированно завершился до первой записи.
+  Future<void> _writeChain = Future<void>.value();
+  bool _loaded = false;
+  Future<void>? _loadFuture;
+
   List<PinnedMessage> getPinned(String chatRef) {
     return List.unmodifiable(_pinned[chatRef] ?? []);
   }
@@ -59,7 +66,10 @@ class PinStore {
   Future<Directory> _dir() async {
     final docs = await getApplicationDocumentsDirectory();
     final d = Directory('${docs.path}/pin_store');
-    if (!d.existsSync()) d.createSync(recursive: true);
+    // FIX: sync IO в UI потоке. Используем async-варианты.
+    if (!await d.exists()) {
+      await d.create(recursive: true);
+    }
     return d;
   }
 
@@ -68,51 +78,84 @@ class PinStore {
     return File('${d.path}/pinned.json');
   }
 
-  Future<void> load() async {
-    final f = await _file();
-    if (!f.existsSync()) return;
+  Future<void> load() {
+    // Гарантируем, что load выполнится ровно один раз и последующие await
+    // вернут тот же Future, не запуская повторное чтение.
+    return _loadFuture ??= _doLoad();
+  }
+
+  Future<void> _doLoad() async {
     try {
-      final raw = jsonDecode(f.readAsStringSync()) as List;
+      final f = await _file();
+      if (!await f.exists()) {
+        _loaded = true;
+        return;
+      }
+      final content = await f.readAsString();
+      final raw = jsonDecode(content) as List;
       _pinned.clear();
       for (final e in raw.whereType<Map>()) {
         final pm = PinnedMessage.fromJson(Map<String, dynamic>.from(e));
         _pinned.putIfAbsent(pm.chatRef, () => []);
         _pinned[pm.chatRef]!.add(pm);
       }
-    } catch (_) {}
+    } catch (_) {
+      // Тихо игнорируем — повреждённый файл не должен валить UI.
+    } finally {
+      _loaded = true;
+    }
   }
 
-  Future<void> save() async {
+  Future<void> _save() async {
     final f = await _file();
-    final data = _pinned.values.expand((v) => v).map((p) => p.toJson()).toList();
-    f.writeAsStringSync(jsonEncode(data));
+    final data =
+        _pinned.values.expand((v) => v).map((p) => p.toJson()).toList();
+    await f.writeAsString(jsonEncode(data));
+  }
+
+  /// Внешний save — упорядочивается через цепочку чтобы избежать гонок.
+  Future<void> save() => _enqueue(_save);
+
+  Future<void> _enqueue(Future<void> Function() op) {
+    // Сначала дожидаемся load (если ещё не загрузились).
+    final ensureLoaded = _loaded ? Future<void>.value() : load();
+    final next = _writeChain.then((_) => ensureLoaded).then((_) => op());
+    // Не пробрасываем ошибки в цепочку — иначе одна неудачная запись
+    // заблокирует все последующие.
+    _writeChain = next.catchError((_) {});
+    return next;
   }
 
   bool isPinned(String chatRef, String key) {
     return (_pinned[chatRef] ?? []).any((p) => p.key == key);
   }
 
-  Future<void> pin(PinnedMessage msg) async {
-    _pinned.putIfAbsent(msg.chatRef, () => []);
-    // Не добавляем дубликаты
-    final list = _pinned[msg.chatRef]!;
-    if (!list.any((p) => p.key == msg.key)) {
-      list.add(msg);
-    }
-    await save();
+  Future<void> pin(PinnedMessage msg) {
+    return _enqueue(() async {
+      _pinned.putIfAbsent(msg.chatRef, () => []);
+      final list = _pinned[msg.chatRef]!;
+      if (!list.any((p) => p.key == msg.key)) {
+        list.add(msg);
+      }
+      await _save();
+    });
   }
 
-  Future<void> unpin(String chatRef, String key) async {
-    _pinned[chatRef]?.removeWhere((p) => p.key == key);
-    if (_pinned[chatRef]?.isEmpty ?? false) {
-      _pinned.remove(chatRef);
-    }
-    await save();
+  Future<void> unpin(String chatRef, String key) {
+    return _enqueue(() async {
+      _pinned[chatRef]?.removeWhere((p) => p.key == key);
+      if (_pinned[chatRef]?.isEmpty ?? false) {
+        _pinned.remove(chatRef);
+      }
+      await _save();
+    });
   }
 
   /// Заменить все закрепы чата (для массовой операции)
-  Future<void> replacePins(String chatRef, List<PinnedMessage> pins) async {
-    _pinned[chatRef] = List.from(pins);
-    await save();
+  Future<void> replacePins(String chatRef, List<PinnedMessage> pins) {
+    return _enqueue(() async {
+      _pinned[chatRef] = List.from(pins);
+      await _save();
+    });
   }
 }

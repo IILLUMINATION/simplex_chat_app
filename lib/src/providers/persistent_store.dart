@@ -65,6 +65,13 @@ class ProfileData {
   );
 }
 
+String? _connStatusTypeFromActiveConn(Map<String, dynamic>? activeConn) {
+  if (activeConn == null) return null;
+  final cs = activeConn['connStatus'];
+  if (cs is Map<String, dynamic>) return cs['type'] as String?;
+  return null;
+}
+
 /// Parsed chat item from /_get chats response
 class ChatPreview {
   const ChatPreview({
@@ -79,6 +86,8 @@ class ChatPreview {
     this.contactUsed,
     this.avatarImage,
     this.lastFromMe = false,
+    this.connStatusType,
+    this.embeddedContactRequestId,
   });
 
   final String chatRef; // e.g. "@1" or "#1"
@@ -92,6 +101,33 @@ class ChatPreview {
   final bool? contactUsed;
   final Uint8List? avatarImage;
   final bool lastFromMe;
+  /// From [Contact.activeConn.connStatus.type] when present (SimpleX API).
+  final String? connStatusType;
+  /// [Contact.contactRequestId] — incoming address request tied to a direct chat row.
+  final int? embeddedContactRequestId;
+
+  /// Whether the user can send messages in this direct chat (groups always true).
+  bool get isMessagingReady {
+    if (chatType != 'contact') return true;
+    if (contactStatus != null && contactStatus != 'active') return false;
+    final t = connStatusType;
+    if (t == null) return true;
+    return t == 'ready' || t == 'sndReady';
+  }
+
+  /// Direct chat that still needs acceptance via [embeddedContactRequestId].
+  bool get needsAcceptFromDirectRow =>
+      chatType == 'contact' &&
+      embeddedContactRequestId != null &&
+      !isMessagingReady &&
+      (contactStatus == null || contactStatus == 'active');
+
+  /// Direct chat: connection in progress but no separate contact request id on the row.
+  bool get isConnectingWithoutRequest =>
+      chatType == 'contact' &&
+      embeddedContactRequestId == null &&
+      !isMessagingReady &&
+      (contactStatus == null || contactStatus == 'active');
 
   factory ChatPreview.fromJson(Map<String, dynamic> json) {
     final chatInfo = json['chatInfo'] as Map<String, dynamic>? ?? {};
@@ -126,6 +162,8 @@ class ChatPreview {
     String? contactStatus;
     bool? contactUsed;
     Uint8List? avatar;
+    String? connStatusType;
+    int? embeddedContactRequestId;
 
     if (chatType == 'contactRequest' && contactRequest != null) {
       type = 'contactRequest';
@@ -149,6 +187,9 @@ class ChatPreview {
       final profile = contact['profile'] as Map<String, dynamic>?;
       final img = profile?['image'] as String?;
       avatar = _decodeImage(img);
+      final activeConn = contact['activeConn'] as Map<String, dynamic>?;
+      connStatusType = _connStatusTypeFromActiveConn(activeConn);
+      embeddedContactRequestId = contact['contactRequestId'] as int?;
     } else if (group != null) {
       type = 'group';
       name =
@@ -158,7 +199,10 @@ class ChatPreview {
       id = group['groupId'] as int?;
     } else if (chatType == 'contactConnection') {
       type = 'contactConnection';
-      name = 'Pending connection';
+      final cc = chatInfo['contactConnection'] as Map<String, dynamic>?;
+      id = cc?['pccConnId'] as int?;
+      final alias = (cc?['localAlias'] as String?)?.trim();
+      name = alias != null && alias.isNotEmpty ? alias : '';
     } else {
       type = 'unknown';
       name = '';
@@ -178,6 +222,8 @@ class ChatPreview {
       contactUsed: contactUsed,
       avatarImage: avatar,
       lastFromMe: lastFromMe,
+      connStatusType: connStatusType,
+      embeddedContactRequestId: embeddedContactRequestId,
     );
   }
 }
@@ -194,7 +240,7 @@ Map<String, dynamic>? _pickLatestChatItem(List items) {
       bestTs = ts;
       continue;
     }
-    if (ts != null && (bestTs == null || ts > bestTs!)) {
+    if (ts != null && (bestTs == null || ts > bestTs)) {
       best = item;
       bestTs = ts;
     }

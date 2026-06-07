@@ -4,6 +4,7 @@ import 'dart:isolate';
 import 'dart:io' show Platform;
 
 import 'package:ffi/ffi.dart';
+import 'package:flutter/foundation.dart' show debugPrint, kDebugMode;
 
 import 'tanglex_bindings.dart';
 
@@ -62,20 +63,26 @@ class TanglexNative {
   /// This is a migration confirmation, NOT a password confirmation.
   Future<String> migrateInitKey({
     required String path,
+    required String passphrase,
     String confirm = 'yesUp',
   }) async {
     await init();
 
-    const strongPass = 'Tanglex_Strong_Password_12345!!!';
+    if (passphrase.isEmpty) {
+      throw ArgumentError('passphrase must not be empty');
+    }
+
     final pathPtr = path.toNativeUtf8();
-    final passPtr = strongPass.toNativeUtf8();
+    final passPtr = passphrase.toNativeUtf8();
     final confirmPtr = confirm.toNativeUtf8();
     final ctrlOut = calloc<chat_ctrl>();
 
     try {
-      print(
-        'Calling Haskell: path=$path, pass=$strongPass, confirm=$confirm, keepKey=0',
-      );
+      if (kDebugMode) {
+        // SECURITY: НЕ логируем passphrase — даже в debug это плохая идея,
+        // потому что debug-логи часто попадают в багрепорты пользователей.
+        debugPrint('chat_migrate_init_key: path=$path confirm=$confirm');
+      }
       final resultPtr = _bindings.chat_migrate_init_key(
         pathPtr.cast<ffi.Char>(),
         passPtr.cast<ffi.Char>(),
@@ -85,9 +92,20 @@ class TanglexNative {
         ctrlOut,
       );
       final result = _takeCStringAndFreeStatic(resultPtr);
-      print('Haskell Response: $result');
+      if (kDebugMode) {
+        debugPrint('chat_migrate_init_key response (truncated): '
+            '${result.length > 200 ? '${result.substring(0, 200)}…' : result}');
+      }
 
-      _chatController = ctrlOut.value;
+      final ctrlValue = ctrlOut.value;
+      if (ctrlValue == ffi.nullptr) {
+        // Не атачим nullptr — иначе все последующие FFI-вызовы упадут SIGSEGV.
+        throw StateError(
+          'chat_migrate_init_key returned null chat controller. '
+          'Response: $result',
+        );
+      }
+      _chatController = ctrlValue;
       return result;
     } finally {
       malloc.free(pathPtr);

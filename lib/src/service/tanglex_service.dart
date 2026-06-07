@@ -2,13 +2,82 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:isolate';
 import 'dart:io';
+import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../ffi/tanglex_native.dart';
 import '../providers/persistent_store.dart';
+
+(String?, String?) _parseApiCommandError(Map<String, dynamic> json) {
+  final err = json['error'];
+  if (err == null) return (null, null);
+  if (err is String) return (null, err);
+  if (err is! Map) return (null, err.toString());
+  final errMap = Map<String, dynamic>.from(err);
+  final errorType = errMap['errorType'];
+  if (errorType is Map) {
+    final et = Map<String, dynamic>.from(errorType);
+    final t = et['type']?.toString();
+    final msg = et['message']?.toString();
+    return (t, msg);
+  }
+  final storeError = errMap['storeError'];
+  if (storeError is Map) {
+    final se = Map<String, dynamic>.from(storeError);
+    return (se['type']?.toString(), null);
+  }
+  return (null, errMap.toString());
+}
+
+/// When [result]['type'] == `chatCmdError`, returns nested error code (e.g. `chatNotStarted`).
+String? _chatCmdErrorCode(Map<String, dynamic> result) {
+  final ce = result['chatError'];
+  if (ce is! Map) return null;
+  final m = Map<String, dynamic>.from(ce);
+  final kind = m['type'] as String?;
+  if (kind == 'error' && m['errorType'] is Map) {
+    final et = Map<String, dynamic>.from(m['errorType'] as Map);
+    return et['type'] as String?;
+  }
+  if (kind == 'errorStore' && m['storeError'] is Map) {
+    final se = Map<String, dynamic>.from(m['storeError'] as Map);
+    return se['type'] as String?;
+  }
+  if (kind == 'errorAgent' && m['agentError'] is Map) {
+    final ae = Map<String, dynamic>.from(m['agentError'] as Map);
+    return ae['type'] as String?;
+  }
+  return kind;
+}
+
+/// Outcome of sending a text message through the core.
+class SendMessageResult {
+  const SendMessageResult({
+    required this.ok,
+    this.errorType,
+    this.detail,
+  });
+
+  final bool ok;
+  final String? errorType;
+  final String? detail;
+
+  factory SendMessageResult.fromResponseJson(Map<String, dynamic> json) {
+    if (json.containsKey('result') && json['result'] != null) {
+      return const SendMessageResult(ok: true);
+    }
+    final parsed = _parseApiCommandError(json);
+    return SendMessageResult(
+      ok: false,
+      errorType: parsed.$1,
+      detail: parsed.$2,
+    );
+  }
+}
 
 class TanglexService {
   TanglexService({TanglexNative? native}) : _native = native ?? TanglexNative();
@@ -24,7 +93,17 @@ class TanglexService {
   bool _isInitialized = false;
   int? _activeUserId;
   bool _verboseLogs = false;
-  bool _dumpedChatItem = true;
+  // FIX: было _dumpedChatItem = true, из-за чего блок отладочного дампа
+  // никогда не срабатывал. Поведение сохраняем (дамп выключен по умолчанию),
+  // но через явный флаг.
+  bool _dumpedChatItem = !kDebugMode;
+
+  /// Максимальный размер кольцевого буфера debug-логов.
+  /// До этого фикса логи росли неограниченно → OOM при длительной сессии.
+  static const int _kMaxLogLines = 500;
+
+  /// Storage key для per-install passphrase шифрования БД SimpleX.
+  static const String _kDbPassphraseKey = 'tanglex_db_passphrase_v1';
 
   bool get isInitialized => _isInitialized;
 
@@ -45,12 +124,23 @@ class TanglexService {
       final docsDir = await getApplicationDocumentsDirectory();
       final basePath = '${docsDir.path}/tanglex_data';
       String pathToUse = basePath;
-      Directory(pathToUse).createSync(recursive: true);
+      await Directory(pathToUse).create(recursive: true);
       _appendLog('Data directory: $pathToUse');
+
+      // SECURITY: ранее использовался хардкоженный пароль в открытом виде
+      // в APK ('Tanglex_Strong_Password_12345!!!'). Любой, кто извлёк бы
+      // libapp.so / dart aot, расшифровал бы БД любого пользователя.
+      // Теперь — random per-install 256-bit passphrase, persisted в
+      // приватном SharedPreferences (защищён от других приложений Linux
+      // permissions и от cloud-backup через allowBackup="false").
+      final passphrase = await _getOrCreateDbPassphrase();
 
       String initResult = '';
       for (var attempt = 0; attempt < 3; attempt++) {
-        initResult = await _native.migrateInitKey(path: pathToUse);
+        initResult = await _native.migrateInitKey(
+          path: pathToUse,
+          passphrase: passphrase,
+        );
         if (!_isDbLocked(initResult)) break;
         _appendLog('DB is locked, retrying init (${attempt + 1}/3)...');
         _native.stopEventLoop();
@@ -65,12 +155,15 @@ class TanglexService {
         _appendLog(
           'DB still locked. Falling back to temporary data dir: $hotPath',
         );
-        Directory(hotPath).createSync(recursive: true);
+        await Directory(hotPath).create(recursive: true);
         pathToUse = hotPath;
-        initResult = await _native.migrateInitKey(path: pathToUse);
-        _appendLog('migrateInitKey (hot): $initResult');
+        initResult = await _native.migrateInitKey(
+          path: pathToUse,
+          passphrase: passphrase,
+        );
+        _appendLog('migrateInitKey (hot): completed');
       }
-      _appendLog('migrateInitKey: $initResult');
+      _appendLog('migrateInitKey: completed');
 
       final normalized = initResult.toLowerCase();
       if (normalized.contains('error') || normalized.contains('invalid')) {
@@ -91,6 +184,14 @@ class TanglexService {
     } catch (error, stackTrace) {
       _appendLog('Initialization error: $error');
       _appendLog(stackTrace.toString());
+      // FIX: ранее при ошибке ReceivePort и event subscription оставались
+      // живыми → утечка native handles и потенциальная блокировка БД при
+      // повторной попытке init.
+      await _eventSubscription?.cancel();
+      _eventSubscription = null;
+      _receivePort?.close();
+      _receivePort = null;
+      _native.stopEventLoop();
       rethrow;
     }
   }
@@ -206,8 +307,8 @@ class TanglexService {
     }
   }
 
-  /// Send a text message to a contact
-  Future<bool> sendMessage(
+  /// Send a text message to a contact or group.
+  Future<SendMessageResult> sendMessage(
     String chatRef,
     String text, {
     int? quotedItemId,
@@ -220,22 +321,49 @@ class TanglexService {
       final jsonStr = _jsonCompact([payload]);
       final cmd = '/_send $chatRef json $jsonStr';
       final resp = await sendCommand(cmd);
-      if (resp == null) return false;
+      if (resp == null) {
+        return const SendMessageResult(ok: false, errorType: 'noResponse');
+      }
       try {
         final json = Map<String, dynamic>.from(_decodeJson(resp));
-        return json['result'] != null;
+        return SendMessageResult.fromResponseJson(json);
       } catch (_) {
-        return false;
+        return const SendMessageResult(ok: false, errorType: 'parseError');
       }
     }
     final cmd = '/_send $chatRef text ${_escapeText(text)}';
     final resp = await sendCommand(cmd);
-    if (resp == null) return false;
+    if (resp == null) {
+      return const SendMessageResult(ok: false, errorType: 'noResponse');
+    }
     try {
       final json = Map<String, dynamic>.from(_decodeJson(resp));
-      return json['result'] != null;
-    } catch (e) {
-      return false;
+      return SendMessageResult.fromResponseJson(json);
+    } catch (_) {
+      return const SendMessageResult(ok: false, errorType: 'parseError');
+    }
+  }
+
+  /// Whether a direct chat ([chatRef] like `@12`) can send messages right now.
+  Future<bool?> getContactMessagingReady(String chatRef) async {
+    if (!chatRef.startsWith('@')) return null;
+    final resp = await sendCommand('/_get chat $chatRef count=1');
+    if (resp == null) return null;
+    try {
+      final json = Map<String, dynamic>.from(_decodeJson(resp));
+      if (json.containsKey('error')) return null;
+      final result = json['result'] as Map<String, dynamic>?;
+      if (result == null) return null;
+      final rType = result['type'] as String?;
+      final chatObj =
+          (rType == 'apiChat' ? result['chat'] : result)
+              as Map<String, dynamic>?;
+      if (chatObj == null) return null;
+      final preview = ChatPreview.fromJson(chatObj);
+      if (preview.chatType != 'contact') return null;
+      return preview.isMessagingReady;
+    } catch (_) {
+      return null;
     }
   }
 
@@ -444,12 +572,14 @@ class TanglexService {
       pathToSend = filePath;
     }
 
-    final isWebm = filePath.toLowerCase().endsWith('.webm');
+    final isWebm = pathToSend.toLowerCase().endsWith('.webm');
+    // Маркер /sticker — как с закрепами (/pin): собеседник видит файл, локально
+    // однозначно распознаём стикер (имя st__… + тег в тексте).
     final payload = {
       'filePath': pathToSend,
       'msgContent': {
         'type': isWebm ? 'video' : 'image',
-        'text': '',
+        'text': '/sticker',
         'image': 'data:$previewMime;base64,${base64Encode(previewBytes)}',
         if (isWebm) 'duration': 0,
       },
@@ -616,20 +746,66 @@ class TanglexService {
 
   /// Set active user
   Future<bool> setActiveUser(int userId) async {
-    final resp = await sendCommand('/_user $userId');
-    if (resp == null) return false;
-    try {
-      final json = Map<String, dynamic>.from(_decodeJson(resp));
-      if (json.containsKey('error')) return false;
-      final result = json['result'] as Map<String, dynamic>?;
-      if (result != null && result['type'] == 'activeUser') {
-        _activeUserId = userId;
-        return true;
+    await _startChatIfPossible();
+    for (var attempt = 0; attempt < 2; attempt++) {
+      final resp = await sendCommand('/_user $userId');
+      if (resp == null) {
+        if (kDebugMode) {
+          debugPrint('[Tanglex] setActiveUser($userId): null response');
+        }
+        return false;
       }
-      return false;
-    } catch (_) {
-      return false;
+      try {
+        final json = Map<String, dynamic>.from(_decodeJson(resp));
+        if (kDebugMode) {
+          final r = json['result'];
+          debugPrint(
+            '[Tanglex] setActiveUser($userId) attempt=${attempt + 1} '
+            'topKeys=${json.keys.toList()} resultType=${r is Map ? r['type'] : r}',
+          );
+        }
+        if (json.containsKey('error')) {
+          final parsed = _parseApiCommandError(json);
+          if (kDebugMode) {
+            debugPrint(
+              '[Tanglex] setActiveUser top-level error: ${parsed.$1} ${parsed.$2}',
+            );
+          }
+          return false;
+        }
+        final result = json['result'] as Map<String, dynamic>?;
+        if (result != null && result['type'] == 'activeUser') {
+          _activeUserId = userId;
+          if (kDebugMode) {
+            debugPrint('[Tanglex] setActiveUser($userId): ok');
+          }
+          return true;
+        }
+        if (result != null && result['type'] == 'chatCmdError') {
+          final code = _chatCmdErrorCode(result);
+          if (kDebugMode) {
+            debugPrint('[Tanglex] setActiveUser chatCmdError code=$code');
+          }
+          if (code == 'chatNotStarted' && attempt == 0) {
+            await _startChatIfPossible();
+            continue;
+          }
+          return false;
+        }
+        if (kDebugMode) {
+          debugPrint(
+            '[Tanglex] setActiveUser($userId): unexpected result type ${result?['type']}',
+          );
+        }
+        return false;
+      } catch (e) {
+        if (kDebugMode) {
+          debugPrint('[Tanglex] setActiveUser($userId) parse error: $e');
+        }
+        return false;
+      }
     }
+    return false;
   }
 
   /// Create a connection link (long-term address)
@@ -648,14 +824,27 @@ class TanglexService {
       // Check for error
       if (json.containsKey('error')) {
         final errorObj = json['error'];
-        final errorType = errorObj is Map ? errorObj['errorType'] : null;
-        final errorCode = errorType is Map ? errorType['type'] : null;
+        String? errorCode;
+        if (errorObj is Map) {
+          // Try first error structure: {errorType: {type: "duplicateContactLink"}}
+          final errorType = errorObj['errorType'];
+          if (errorType is Map) {
+            errorCode = errorType['type'] as String?;
+          }
+          // Try second error structure: {type: "errorStore", storeError: {type: "duplicateContactLink"}}
+          if (errorCode == null) {
+            final storeError = errorObj['storeError'];
+            if (storeError is Map) {
+              errorCode = storeError['type'] as String?;
+            }
+          }
+        }
         if (errorCode == 'duplicateContactLink') {
           return _getExistingAddress();
         }
-        final message = errorType is Map
-            ? (errorType['message'] ?? errorType['type'])
-            : errorObj;
+        final message = errorObj is Map
+            ? (errorObj['message'] ?? errorObj.toString())
+            : errorObj.toString();
         _appendLog('createConnectionLink error: $message');
         return null;
       }
@@ -773,20 +962,15 @@ class TanglexService {
     }
   }
 
-  /// Accept a pending contact connection
-  Future<bool> acceptConnection(int connId) async {
-    final resp = await sendCommand('/_accept incognito $connId');
-    if (resp == null) return false;
-    try {
-      final json = Map<String, dynamic>.from(_decodeJson(resp));
-      return json['result'] != null;
-    } catch (e) {
-      return false;
-    }
+  /// Accept by contact request id (same as [acceptContactRequest]).
+  /// Historically misnamed; kept for callers that still use this name.
+  Future<bool> acceptConnection(int contactRequestId) async {
+    return acceptContactRequest(contactRequestId);
   }
 
   /// Delete user profile
   Future<bool> deleteUser(int userId, {bool deleteSmpQueues = false}) async {
+    await _startChatIfPossible();
     final cmd =
         '/_delete user $userId del_smp=${deleteSmpQueues ? 'on' : 'off'}';
     _appendLog('deleteUser command: $cmd');
@@ -799,6 +983,13 @@ class TanglexService {
     try {
       final json = Map<String, dynamic>.from(_decodeJson(resp));
       _appendLog('deleteUser parsed: $json');
+      if (kDebugMode) {
+        final r = json['result'];
+        debugPrint(
+          '[Tanglex] deleteUser($userId) topKeys=${json.keys.toList()} '
+          'resultType=${r is Map ? r['type'] : r}',
+        );
+      }
       if (json.containsKey('error')) {
         final errorObj = json['error'];
         final errorType = errorObj is Map ? errorObj['errorType'] : null;
@@ -825,6 +1016,26 @@ class TanglexService {
         return false;
       }
       final result = json['result'] as Map<String, dynamic>?;
+      if (result != null && result['type'] == 'chatCmdError') {
+        final code = _chatCmdErrorCode(result);
+        _appendLog('deleteUser chatCmdError: $code full=$result');
+        if (code == 'chatNotStarted') {
+          await _startChatIfPossible();
+          final retry = await sendCommand(cmd);
+          if (retry == null) return false;
+          final retryJson = Map<String, dynamic>.from(_decodeJson(retry));
+          if (retryJson.containsKey('error')) {
+            _appendLog('deleteUser retry (chatCmdError) err: ${retryJson['error']}');
+            return false;
+          }
+          final retryResult = retryJson['result'] as Map<String, dynamic>?;
+          if (retryResult != null && retryResult['type'] == 'cmdOk') {
+            if (_activeUserId == userId) _activeUserId = null;
+            return true;
+          }
+        }
+        return false;
+      }
       _appendLog('deleteUser result: $result');
       if (result != null && result['type'] == 'cmdOk') {
         if (_activeUserId == userId) _activeUserId = null;
@@ -1001,9 +1212,49 @@ class TanglexService {
   }
 
   void _appendLog(String line) {
-    print(line);
-    final updated = List<String>.from(logs.value)..add(line);
+    // SECURITY: убрали безусловный print() — он лил содержимое сообщений и
+    // JSON-протокола (с приватными данными) в logcat в release-сборке.
+    if (kDebugMode) {
+      debugPrint(line);
+    }
+    final current = logs.value;
+    // Кольцевой буфер фиксированного размера — иначе при долгой сессии
+    // List<String> рос неограниченно (O(n²) при каждом добавлении).
+    final List<String> updated;
+    if (current.length >= _kMaxLogLines) {
+      updated = List<String>.from(
+        current.sublist(current.length - _kMaxLogLines + 1),
+      )..add(line);
+    } else {
+      updated = List<String>.from(current)..add(line);
+    }
     logs.value = updated;
+  }
+
+  /// Generates (or fetches existing) random passphrase used to encrypt
+  /// SimpleX SQLite database.
+  ///
+  /// Хранится в SharedPreferences (на Android — приватный XML файл в
+  /// /data/data/<pkg>/, недоступный другим приложениям при условии
+  /// allowBackup="false" в манифесте, см. AndroidManifest.xml).
+  ///
+  /// TODO(security): при добавлении flutter_secure_storage переместить
+  /// в Android Keystore / iOS Keychain.
+  Future<String> _getOrCreateDbPassphrase() async {
+    final prefs = await SharedPreferences.getInstance();
+    final existing = prefs.getString(_kDbPassphraseKey);
+    if (existing != null && existing.isNotEmpty) {
+      return existing;
+    }
+    // 32 байта = 256 бит энтропии.
+    final rng = Random.secure();
+    final bytes = Uint8List(32);
+    for (var i = 0; i < bytes.length; i++) {
+      bytes[i] = rng.nextInt(256);
+    }
+    final passphrase = base64UrlEncode(bytes);
+    await prefs.setString(_kDbPassphraseKey, passphrase);
+    return passphrase;
   }
 
   void _logVerbose(String line) {
@@ -1039,8 +1290,10 @@ class TanglexService {
   Future<void> dispose() async {
     _native.stopEventLoop();
     await _eventSubscription?.cancel();
+    _eventSubscription = null;
     _receivePort?.close();
-    _eventStream.close();
+    _receivePort = null;
+    await _eventStream.close();
     logs.dispose();
   }
 }

@@ -9,7 +9,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:record/record.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 import 'package:video_player/video_player.dart';
 import 'package:video_thumbnail/video_thumbnail.dart' as vthumb;
@@ -17,7 +16,7 @@ import 'package:video_thumbnail/video_thumbnail.dart' as vthumb;
 import '../../../main.dart';
 import '../../data/pin_store.dart';
 import '../../localization/app_localizations.dart';
-import '../../service/tanglex_service.dart' show ImagePayload;
+import '../../service/tanglex_service.dart' show ImagePayload, SendMessageResult;
 import 'utils/chat_message_parser.dart'
     show prepareStickerPreview, compressPreview;
 import '../../stickers/sticker_store.dart'
@@ -141,6 +140,8 @@ class ChatScreen extends ConsumerStatefulWidget {
   final String chatName;
   final Uint8List? avatarImage;
   final String chatType;
+  /// For direct chats: core-reported readiness to send ([ChatPreview.isMessagingReady]).
+  final bool initialMessagingReady;
 
   const ChatScreen({
     super.key,
@@ -148,6 +149,7 @@ class ChatScreen extends ConsumerStatefulWidget {
     required this.chatName,
     this.avatarImage,
     required this.chatType,
+    this.initialMessagingReady = true,
   });
 
   @override
@@ -177,13 +179,22 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   UiMessage? _replyTo;
   bool _circleMode = false;
   int _selectedPackIndex = 0;
-  final AudioRecorder _recorder = AudioRecorder();
-  bool _recording = false;
-  DateTime? _recordStartedAt;
+  bool _messagingReady = true;
+
+  int? get _directContactId {
+    final r = widget.chatRef;
+    if (!r.startsWith('@')) return null;
+    return int.tryParse(r.substring(1));
+  }
+
+  bool get _canCompose =>
+      widget.chatType != 'contact' || _messagingReady;
 
   @override
   void initState() {
     super.initState();
+    _messagingReady =
+        widget.chatType != 'contact' || widget.initialMessagingReady;
     final t0 = DateTime.now();
     debugPrint('💬 ChatScreen initState: ${widget.chatRef}');
     // Откладываем загрузку чтобы анимация перехода прошла плавно
@@ -198,7 +209,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         });
       }
     });
-    _pinStore.load();
+    // load() возвращает кэшированный Future при повторных вызовах,
+    // а очередь записи в PinStore сама дождётся завершения load
+    // перед pin/unpin — поэтому достаточно "огневой" инициации.
+    unawaited(_pinStore.load());
+    unawaited(_stickerStore.ensureLoaded());
     _eventSub = ref
         .read(tanglexServiceProvider)
         .eventStream
@@ -224,7 +239,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     try {
       final docs = await getApplicationDocumentsDirectory();
       final dir = Directory('${docs.path}/files');
-      if (!dir.existsSync()) dir.createSync(recursive: true);
+      if (!await dir.exists()) {
+        await dir.create(recursive: true);
+      }
       _filesDir = dir.path;
       _globalFilesDirCache = dir.path;
       debugPrint(
@@ -320,11 +337,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           cleaned.add(m);
         }
       }
-      if (anyChanged) {
+      if (anyChanged && mounted) {
         setState(() => _applyMessages(cleaned));
       }
+      if (!mounted) return;
 
       await _autoReceiveImages(anyChanged ? cleaned : parsed);
+      await _refreshMessagingReadyFlag();
     } catch (e) {
       debugPrint('Error loading messages: $e');
       if (mounted) {
@@ -333,9 +352,43 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     }
   }
 
+  Future<void> _refreshMessagingReadyFlag() async {
+    if (widget.chatType != 'contact') return;
+    final service = ref.read(tanglexServiceProvider);
+    final ready = await service.getContactMessagingReady(widget.chatRef);
+    if (!mounted || ready == null) return;
+    setState(() => _messagingReady = ready);
+  }
+
+  String _labelForSendFailure(
+    AppLocalizations loc,
+    SendMessageResult r,
+  ) {
+    switch (r.errorType) {
+      case 'contactNotReady':
+        return loc.translate('send_error_contact_not_ready');
+      case 'contactNotActive':
+        return loc.translate('send_error_contact_not_active');
+      case 'noResponse':
+        return loc.translate('send_error_no_response');
+      case 'parseError':
+        return loc.translate('send_error_parse');
+      default:
+        if (r.detail != null && r.detail!.trim().isNotEmpty) {
+          return loc
+              .translate('failed_send_error')
+              .replaceAll('%s', r.detail!.trim());
+        }
+        return loc
+            .translate('failed_send_error')
+            .replaceAll('%s', r.errorType ?? '?');
+    }
+  }
+
   Future<void> _sendMessage() async {
     final text = _msgController.text.trim();
     if (text.isEmpty || _sending) return;
+    if (!_canCompose) return;
 
     _msgController.clear();
     setState(() => _sending = true);
@@ -349,11 +402,23 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final quotedItemId = _replyTo?.itemId;
 
     final service = ref.read(tanglexServiceProvider);
-    final success = await service.sendMessage(
+    final sendResult = await service.sendMessage(
       widget.chatRef,
       actualText,
       quotedItemId: quotedItemId,
     );
+    final success = sendResult.ok;
+
+    if (!success && mounted) {
+      _msgController.text = text;
+      final loc = AppLocalizations.of(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(_labelForSendFailure(loc, sendResult)),
+          backgroundColor: const Color(0xFFCF6679),
+        ),
+      );
+    }
 
     if (success && shouldPin) {
       await Future.delayed(const Duration(milliseconds: 500));
@@ -375,8 +440,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       }
     } else if (success) {
       await _loadMessages();
+      await _refreshMessagingReadyFlag();
     }
 
+    if (!mounted) return;
     setState(() {
       _sending = false;
       _replyTo = null;
@@ -411,6 +478,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       await _loadMessages();
       if (mounted) setState(() => _replyTo = null);
     }
+    if (!mounted) return;
     setState(() => _sendingMedia = false);
   }
 
@@ -448,6 +516,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         ),
       );
     }
+    if (!mounted) return;
     setState(() => _sendingMedia = false);
   }
 
@@ -492,6 +561,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         ),
       );
     }
+    if (!mounted) return;
     setState(() => _sendingMedia = false);
   }
 
@@ -504,7 +574,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     try {
       final docs = await getApplicationDocumentsDirectory();
       final dir = Directory('${docs.path}/media_cache');
-      if (!dir.existsSync()) dir.createSync(recursive: true);
+      // FIX: sync IO в UI потоке → async, иначе на медленных дисках
+      // фризы при отправке файла.
+      if (!await dir.exists()) {
+        await dir.create(recursive: true);
+      }
       final ext = _fileExt(path);
       final target = File(
         '${dir.path}/file_${DateTime.now().millisecondsSinceEpoch}$ext',
@@ -560,72 +634,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         ),
       );
     }
+    if (!mounted) return;
     setState(() => _sendingMedia = false);
   }
 
-  Future<void> _startVoiceRecording() async {
-    if (_recording || _sendingMedia) return;
-    final hasPerm = await _recorder.hasPermission();
-    if (!hasPerm) return;
-    try {
-      final tmp = await getTemporaryDirectory();
-      final ts = DateTime.now().millisecondsSinceEpoch;
-      final path = '${tmp.path}/voice_$ts.m4a';
-      await _recorder.start(
-        const RecordConfig(encoder: AudioEncoder.aacLc, bitRate: 64000),
-        path: path,
-      );
-      _recordStartedAt = DateTime.now();
-      if (mounted) setState(() => _recording = true);
-    } catch (_) {
-      if (mounted) setState(() => _recording = false);
-    }
-  }
-
-  Future<void> _stopVoiceRecording() async {
-    if (!_recording) return;
-    try {
-      final path = await _recorder.stop();
-      final startedAt = _recordStartedAt;
-      _recordStartedAt = null;
-      if (mounted) setState(() => _recording = false);
-      if (path == null || startedAt == null) return;
-      final durationSec =
-          DateTime.now().difference(startedAt).inSeconds.clamp(1, 600);
-      await _sendVoice(path, durationSec);
-    } catch (_) {
-      if (mounted) setState(() => _recording = false);
-    }
-  }
-
-  Future<void> _sendVoice(String path, int durationSec) async {
-    if (_sendingMedia) return;
-    setState(() => _sendingMedia = true);
-    final service = ref.read(tanglexServiceProvider);
-    final result = await service.sendVoice(
-      chatRef: widget.chatRef,
-      filePath: path,
-      durationSec: durationSec,
-      quotedItemId: _replyTo?.itemId,
-    );
-    if (result.ok) {
-      await _loadMessages();
-      if (mounted) setState(() => _replyTo = null);
-    } else if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            result.error == null
-                ? 'Не удалось отправить голосовое'
-                : 'Не удалось отправить: ${result.error}',
-          ),
-        ),
-      );
-    }
-    if (mounted) setState(() => _sendingMedia = false);
-  }
-
-  void _openStickerPicker() {
+  Future<void> _openStickerPicker() async {
+    await _stickerStore.ensureLoaded();
+    if (!mounted) return;
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
@@ -903,6 +918,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       ),
     );
     if (result == null) return;
+    if (!mounted) return;
     setState(() => _sendingMedia = true);
     final service = ref.read(tanglexServiceProvider);
     final resultSend = await service.sendVideo(
@@ -929,6 +945,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         ),
       );
     }
+    if (!mounted) return;
     setState(() => _sendingMedia = false);
   }
 
@@ -938,14 +955,27 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final type = result['type'] as String?;
     if (type == null) return;
 
+    if (type == 'contactSndReady' ||
+        type == 'acceptingContactRequest' ||
+        type == 'contactConnecting') {
+      final c = result['contact'];
+      if (c is Map) {
+        final id = c['contactId'] as int?;
+        if (id != null && id == _directContactId) {
+          unawaited(_refreshMessagingReadyFlag());
+        }
+      }
+    }
+
     final chatItems = <Map<String, dynamic>>[];
     if (result['chatItem'] is Map<String, dynamic>) {
       chatItems.add(Map<String, dynamic>.from(result['chatItem']));
     }
     if (result['chatItems'] is List) {
       for (final item in result['chatItems'] as List) {
-        if (item is Map<String, dynamic>)
+        if (item is Map<String, dynamic>) {
           chatItems.add(Map<String, dynamic>.from(item));
+        }
       }
     }
     if (chatItems.isEmpty) return;
@@ -1328,7 +1358,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     _audioStateSub?.cancel();
     _eventSub?.cancel();
     _refreshDebounce?.cancel();
-    _recorder.dispose();
     super.dispose();
   }
 
@@ -1487,6 +1516,40 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    if (widget.chatType == 'contact' && !_messagingReady)
+                      Material(
+                        color: const Color(0xFF152535),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 10,
+                          ),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Padding(
+                                padding: EdgeInsets.only(top: 1),
+                                child: Icon(
+                                  Icons.hourglass_top_rounded,
+                                  color: Color(0xFF5A9CF5),
+                                  size: 22,
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  loc.translate('chat_wait_send'),
+                                  style: const TextStyle(
+                                    color: Color(0xFFB8C5D9),
+                                    fontSize: 13.5,
+                                    height: 1.35,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
                     if (_replyTo != null)
                       Align(
                         alignment: Alignment.centerLeft,
@@ -1573,7 +1636,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
                         IconButton(
-                          onPressed: _sendingMedia ? null : _openAttachMenu,
+                          onPressed: (_sendingMedia || !_canCompose)
+                              ? null
+                              : _openAttachMenu,
                           icon: Icon(Icons.attach_file, color: textSecondary),
                         ),
                         Expanded(
@@ -1581,9 +1646,14 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                             constraints: const BoxConstraints(maxHeight: 120),
                             child: TextField(
                               controller: _msgController,
+                              readOnly: !_canCompose,
                               style: TextStyle(color: textPrimary),
                               decoration: InputDecoration(
-                                hintText: loc.translate('message_hint'),
+                                hintText: _canCompose
+                                    ? loc.translate('message_hint')
+                                    : loc.translate(
+                                        'message_hint_wait_connection',
+                                      ),
                                 hintStyle: const TextStyle(
                                   color: Color(0xFF606060),
                                 ),
@@ -1610,7 +1680,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                             final hasText = value.text.trim().isNotEmpty;
                             if (hasText) {
                               return IconButton(
-                                onPressed: _sending ? null : _sendMessage,
+                                onPressed: (_sending || !_canCompose)
+                                    ? null
+                                    : _sendMessage,
                                 icon: _sending
                                     ? const SizedBox(
                                         width: 20,
@@ -1626,7 +1698,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                               );
                             }
                             return IconButton(
-                              onPressed: _sendingMedia
+                              onPressed: (_sendingMedia || !_canCompose)
                                   ? null
                                   : _openStickerPicker,
                               icon: Icon(
@@ -1647,17 +1719,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                               child: GestureDetector(
                                 onTap: () =>
                                     setState(() => _circleMode = !_circleMode),
-                                onLongPress: _sendingMedia || !_circleMode
+                                onLongPress: _sendingMedia ||
+                                        !_circleMode ||
+                                        !_canCompose
                                     ? null
                                     : _openCircleRecorder,
-                                onLongPressStart:
-                                    _sendingMedia || _circleMode
-                                        ? null
-                                        : (_) => _startVoiceRecording(),
-                                onLongPressEnd:
-                                    _sendingMedia || _circleMode
-                                        ? null
-                                        : (_) => _stopVoiceRecording(),
                                 child: Padding(
                                   padding: const EdgeInsets.symmetric(
                                     horizontal: 8,
@@ -1666,12 +1732,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                                   child: Icon(
                                     _circleMode
                                         ? Icons.radio_button_checked
-                                        : (_recording
-                                              ? Icons.mic
-                                              : Icons.mic),
-                                    color: _recording
-                                        ? const Color(0xFFCF6679)
-                                        : textSecondary,
+                                        : Icons.mic_none,
+                                    color: textSecondary,
                                     size: 24,
                                   ),
                                 ),
@@ -1709,14 +1771,18 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   }
 
   Future<int> _getVideoDuration(String path) async {
+    // FIX: ранее при исключении в initialize() controller не disposed →
+    // утечка нативного MediaPlayer-хэндла (на каждый pickVideo).
+    final controller = VideoPlayerController.file(File(path));
     try {
-      final controller = VideoPlayerController.file(File(path));
       await controller.initialize();
-      final duration = controller.value.duration.inSeconds;
-      await controller.dispose();
-      return duration;
+      return controller.value.duration.inSeconds;
     } catch (_) {
       return 0;
+    } finally {
+      try {
+        await controller.dispose();
+      } catch (_) {}
     }
   }
 

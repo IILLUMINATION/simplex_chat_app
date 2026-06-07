@@ -79,6 +79,16 @@ class AppLocalizations {
     'accept': 'Принять',
     'pending': 'В ожидании',
     'pending_acceptance': 'Ожидает принятия',
+    'incoming_section': 'Входящие',
+    'connecting_secure': 'Устанавливается соединение',
+    'connecting_secure_hint': 'End-to-end шифрование, подождите несколько секунд',
+    'pending_link_connection': 'Ожидается подключение по ссылке',
+    'pending_link_connection_hint': 'Как только собеседник завершит рукопожатие, чат станет активен',
+    'chat_wait_send': 'Дождитесь готовности чата, чтобы отправлять сообщения',
+    'send_error_contact_not_ready': 'Соединение ещё не готово. Подождите или примите запрос в списке чатов.',
+    'send_error_contact_not_active': 'Контакт не активен',
+    'send_error_no_response': 'Нет ответа от ядра',
+    'send_error_parse': 'Ошибка разбора ответа',
 
     // Connect screen
     'core_not_initialized_yet': 'Ядро ещё не инициализировано',
@@ -148,6 +158,7 @@ class AppLocalizations {
     'preview_error': 'Не удалось сделать превью',
     'circle': 'Кружок',
     'message_hint': 'Сообщение...',
+    'message_hint_wait_connection': 'Ожидание соединения…',
     'debug_console': 'Debug-консоль',
     'initializing': 'Инициализация...',
   };
@@ -211,6 +222,18 @@ class AppLocalizations {
     'accept': 'Accept',
     'pending': 'Pending',
     'pending_acceptance': 'Pending acceptance',
+    'incoming_section': 'Incoming',
+    'connecting_secure': 'Establishing connection',
+    'connecting_secure_hint': 'End-to-end encryption — usually takes a few seconds',
+    'pending_link_connection': 'Waiting for link connection',
+    'pending_link_connection_hint':
+        'When your contact finishes the handshake, the chat will become active',
+    'chat_wait_send': 'Wait until the chat is ready to send messages',
+    'send_error_contact_not_ready':
+        'Connection is not ready yet. Wait or accept the request from the chat list.',
+    'send_error_contact_not_active': 'Contact is not active',
+    'send_error_no_response': 'No response from core',
+    'send_error_parse': 'Could not parse server response',
 
     // Connect screen
     'core_not_initialized_yet': 'Core is not initialized yet',
@@ -280,6 +303,7 @@ class AppLocalizations {
     'preview_error': 'Failed to create preview',
     'circle': 'Circle',
     'message_hint': 'Message...',
+    'message_hint_wait_connection': 'Waiting for connection…',
     'debug_console': 'Debug Console',
     'initializing': 'Initializing...',
   };

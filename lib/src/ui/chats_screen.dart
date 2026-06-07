@@ -37,6 +37,12 @@ class _ChatsScreenState extends ConsumerState<ChatsScreen> {
   List<ChatPreview> _chats = [];
   List<ContactRequestPreview> _requests = [];
   bool _loading = false;
+  /// True after the first successful fetch completes (regardless of whether
+  /// the result is empty). Используется чтобы избежать infinite refresh-loop
+  /// в [build] когда у пользователя реально нет чатов.
+  bool _initialLoadDone = false;
+  /// Смена профиля инкрементит nonce, чтобы отбросить ответ [getChats] от предыдущего пользователя.
+  int _chatsFetchNonce = 0;
   ProfileData? _profile;
   StreamSubscription<Map<String, dynamic>>? _eventSub;
   Timer? _refreshDebounce;
@@ -73,6 +79,8 @@ class _ChatsScreenState extends ConsumerState<ChatsScreen> {
             type == 'activeUser' ||
             type == 'contactConnection' ||
             type == 'contact' ||
+            type == 'contactSndReady' ||
+            type == 'contactConnecting' ||
             type == 'chatItem' ||
             type == 'chatItemNew' ||
             type == 'newChatItems' ||
@@ -81,6 +89,15 @@ class _ChatsScreenState extends ConsumerState<ChatsScreen> {
             type == 'chatItemsStatusesUpdated' ||
             type == 'groupChatItemsDeleted') {
           _scheduleRefresh();
+        }
+        if (type == 'contactRequestRejected') {
+          final cr = result['contactRequest'];
+          if (cr is Map && mounted) {
+            final id = Map<String, dynamic>.from(cr)['contactRequestId'] as int?;
+            if (id != null) {
+              setState(() => _requests.removeWhere((r) => r.contactRequestId == id));
+            }
+          }
         }
         if (type == 'receivedContactRequest') {
           final req = result['contactRequest'];
@@ -93,6 +110,12 @@ class _ChatsScreenState extends ConsumerState<ChatsScreen> {
             );
             if (!exists && mounted) {
               setState(() => _requests = [parsed, ..._requests]);
+              if (kDebugMode) {
+                debugPrint(
+                  '[Chats] receivedContactRequest id=${parsed.contactRequestId} '
+                  'contactId_=${parsed.contactId} display=${parsed.displayName}',
+                );
+              }
             }
           }
         }
@@ -102,30 +125,59 @@ class _ChatsScreenState extends ConsumerState<ChatsScreen> {
 
   Future<void> _loadChats() async {
     if (_loading) return;
+    final token = _chatsFetchNonce;
     setState(() => _loading = true);
 
     final service = ref.read(tanglexServiceProvider);
     if (!service.isInitialized) {
+      if (!mounted || token != _chatsFetchNonce) return;
       setState(() {
         _loading = false;
         _chats = [];
+        // НЕ помечаем initialLoadDone — позволяем build повторить попытку,
+        // когда сервис будет инициализирован.
       });
       return;
     }
 
     final chats = await service.getChats();
+    if (!mounted || token != _chatsFetchNonce) return;
     setState(() {
       _chats = chats;
       _loading = false;
+      _initialLoadDone = true;
     });
   }
 
   Future<void> _loadRequests() async {
     final service = ref.read(tanglexServiceProvider);
     if (!service.isInitialized) return;
-    final requests = await service.getContactRequests();
+    final previous = List<ContactRequestPreview>.from(_requests);
+    final fromApi = await service.getContactRequests();
     if (!mounted) return;
-    setState(() => _requests = requests);
+    // API often returns [] while the request exists only on the contact row or
+    // was just delivered via [receivedContactRequest] — merge so we do not
+    // wipe event-driven entries (fixes missing Accept/Decline).
+    final merged = <int, ContactRequestPreview>{};
+    for (final r in fromApi) {
+      if (r.contactRequestId != 0) {
+        merged[r.contactRequestId] = r;
+      }
+    }
+    for (final r in previous) {
+      if (r.contactRequestId != 0) {
+        merged.putIfAbsent(r.contactRequestId, () => r);
+      }
+    }
+    final list = merged.values.toList()
+      ..sort((a, b) => b.contactRequestId.compareTo(a.contactRequestId));
+    if (kDebugMode) {
+      debugPrint(
+        '[Chats] _loadRequests: api=${fromApi.length} prev=${previous.length} '
+        'merged=${list.length} ids=${list.map((e) => e.contactRequestId).toList()}',
+      );
+    }
+    setState(() => _requests = list);
   }
 
   void _scheduleRefresh() {
@@ -306,6 +358,31 @@ class _ChatsScreenState extends ConsumerState<ChatsScreen> {
     final loc = AppLocalizations.of(context);
     final service = ref.watch(tanglexServiceProvider);
     final profileAsync = ref.watch(persistedProfileProvider);
+
+    ref.listen<AsyncValue<ProfileData?>>(persistedProfileProvider, (prev, next) {
+      final nextP = next.asData?.value;
+      if (nextP == null) return;
+      if (!ref.read(tanglexServiceProvider).isInitialized) return;
+      final prevP = prev?.asData?.value;
+      if (prevP?.userId == null) return;
+      if (prevP!.userId == nextP.userId) return;
+      _chatsFetchNonce++;
+      if (!mounted) return;
+      setState(() {
+        _chats = [];
+        _requests = [];
+        _loading = false;
+      });
+      _loadChats();
+      _loadRequests();
+    });
+    final chats = _chats.where((c) => c.chatType != 'contactRequest').toList();
+    final directWithEmbeddedRequest =
+        chats.where((c) => c.needsAcceptFromDirectRow).toList();
+    final embeddedReqIds = directWithEmbeddedRequest
+        .map((c) => c.embeddedContactRequestId!)
+        .toSet();
+
     final requestsFromChats = _chats
         .where((c) => c.chatType == 'contactRequest')
         .map(
@@ -316,28 +393,42 @@ class _ChatsScreenState extends ConsumerState<ChatsScreen> {
           ),
         )
         .toList();
-    final requestsByContactId = {
-      for (final r in _requests)
-        if (r.contactId != null) r.contactId!: r,
-    };
-    final requests = [
+    final fromApiMerged = [
       ...requestsFromChats,
       ..._requests.where(
         (r) => !requestsFromChats.any(
           (x) => x.contactRequestId == r.contactRequestId,
         ),
       ),
-    ];
-    final chats = _chats.where((c) => c.chatType != 'contactRequest').toList();
-    final pendingDirects = chats.where(
-      (c) =>
-          c.chatType == 'contact' &&
-          (c.contactStatus != null && c.contactStatus != 'active'),
-    );
+    ].where((r) => !embeddedReqIds.contains(r.contactRequestId)).toList();
 
-    if (service.isInitialized && !_loading && _chats.isEmpty) {
+    final fromDirect = directWithEmbeddedRequest
+        .map(
+          (c) => ContactRequestPreview(
+            contactRequestId: c.embeddedContactRequestId!,
+            localDisplayName: c.displayName,
+            displayName: c.displayName,
+            contactId: c.chatId,
+          ),
+        )
+        .toList();
+
+    final requestsDisplay = <ContactRequestPreview>[
+      ...fromDirect,
+      ...fromApiMerged,
+    ];
+
+    // FIX: ранее здесь стоял безусловный _scheduleRefresh() для пустого списка,
+    // что приводило к бесконечному циклу build→refresh→setState→build
+    // когда у пользователя действительно нет чатов (сжигало CPU/батарею).
+    // Теперь refresh запускается только один раз — если первичный fetch ещё
+    // не выполнен (например при потере initialised-состояния).
+    if (service.isInitialized &&
+        !_loading &&
+        !_initialLoadDone &&
+        _chats.isEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && !_loading) {
+        if (mounted && !_loading && !_initialLoadDone) {
           _scheduleRefresh();
         }
       });
@@ -364,40 +455,75 @@ class _ChatsScreenState extends ConsumerState<ChatsScreen> {
             return _buildEmpty(loc, service);
           }
 
-          final filteredChats = chats
-              .where(
-                (c) =>
-                    !(c.chatType == 'contact' &&
-                        (c.contactStatus != null &&
-                            c.contactStatus != 'active')),
-              )
-              .toList();
+          final connectingOnly =
+              chats.where((c) => c.isConnectingWithoutRequest).toList();
+          final pccChats =
+              chats.where((c) => c.chatType == 'contactConnection').toList();
+          final pendingInactive = chats.where(
+            (c) =>
+                c.chatType == 'contact' &&
+                c.contactStatus != null &&
+                c.contactStatus != 'active',
+          );
+          final hasIncoming = requestsDisplay.isNotEmpty ||
+              connectingOnly.isNotEmpty ||
+              pccChats.isNotEmpty ||
+              pendingInactive.isNotEmpty;
+
+          final filteredChats = chats.where((c) {
+            if (c.chatType == 'contactConnection') return false;
+            if (c.needsAcceptFromDirectRow) return false;
+            if (c.isConnectingWithoutRequest) return false;
+            if (c.chatType == 'contact' &&
+                c.contactStatus != null &&
+                c.contactStatus != 'active') {
+              return false;
+            }
+            return true;
+          }).toList();
 
           return RefreshIndicator(
-            onRefresh: _loadChats,
+            onRefresh: () async {
+              await _loadChats();
+              await _loadRequests();
+            },
             color: _kAccent,
             child: ListView(
               padding: const EdgeInsets.only(bottom: 8),
               children: [
-                if (requests.isNotEmpty || pendingDirects.isNotEmpty) ...[
-                  ...requests.map(
+                if (hasIncoming) ...[
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        loc.translate('incoming_section'),
+                        style: const TextStyle(
+                          color: _kTextSecondary,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: 0.25,
+                        ),
+                      ),
+                    ),
+                  ),
+                  ...requestsDisplay.map(
                     (req) => _RequestTile(
                       chat: req,
+                      avatarBytes: _avatarBytesForRequest(req),
                       onAccept: () => _acceptRequest(req),
                       onReject: () => _rejectRequest(req),
                     ),
                   ),
-                  ...pendingDirects.map((c) {
-                    final req = requestsByContactId[c.chatId];
-                    if (req != null) {
-                      return _RequestTile(
-                        chat: req,
-                        onAccept: () => _acceptRequest(req),
-                        onReject: () => _rejectRequest(req),
-                      );
-                    }
-                    return _PendingTile(chat: c);
-                  }),
+                  ...connectingOnly.map(
+                    (c) => _ConnectingTile(chat: c),
+                  ),
+                  ...pccChats.map(
+                    (c) => _ConnectingTile(chat: c, isPcc: true),
+                  ),
+                  ...pendingInactive.map(
+                    (c) => _PendingTile(chat: c),
+                  ),
                   const Divider(color: _kDivider, height: 1),
                 ],
                 if (filteredChats.isNotEmpty) ...[
@@ -486,6 +612,19 @@ class _ChatsScreenState extends ConsumerState<ChatsScreen> {
     );
   }
 
+  Uint8List? _avatarBytesForRequest(ContactRequestPreview r) {
+    for (final c in _chats) {
+      if (c.chatType == 'contactRequest' && c.chatId == r.contactRequestId) {
+        return c.avatarImage;
+      }
+      if (c.chatType == 'contact' &&
+          c.embeddedContactRequestId == r.contactRequestId) {
+        return c.avatarImage;
+      }
+    }
+    return null;
+  }
+
   void _openChat(BuildContext context, ChatPreview chat) async {
     debugPrint('👆 Нажатие на чат: ${chat.displayName}');
     final loc = AppLocalizations.of(context);
@@ -506,6 +645,8 @@ class _ChatsScreenState extends ConsumerState<ChatsScreen> {
           chatName: chat.displayName,
           avatarImage: chat.avatarImage,
           chatType: chat.chatType,
+          initialMessagingReady:
+              chat.chatType != 'contact' || chat.isMessagingReady,
         ),
         transitionsBuilder: (ctx, anim1, anim2, child) {
           final tween = Tween(
@@ -547,6 +688,7 @@ class _ChatsScreenState extends ConsumerState<ChatsScreen> {
       setState(() => _requests.removeWhere((r) => r.contactRequestId == reqId));
     }
     await _loadChats();
+    await _loadRequests();
   }
 
   Future<void> _rejectRequest(ContactRequestPreview chat) async {
@@ -570,6 +712,7 @@ class _ChatsScreenState extends ConsumerState<ChatsScreen> {
       setState(() => _requests.removeWhere((r) => r.contactRequestId == reqId));
     }
     await _loadChats();
+    await _loadRequests();
   }
 }
 
@@ -923,13 +1066,121 @@ class _SkeletonTileState extends State<_SkeletonTile>
   }
 }
 
+class _ConnectingTile extends StatelessWidget {
+  final ChatPreview chat;
+  final bool isPcc;
+
+  const _ConnectingTile({
+    required this.chat,
+    this.isPcc = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final loc = AppLocalizations.of(context);
+    final title = chat.displayName.isNotEmpty
+        ? chat.displayName
+        : loc.translate('pending');
+    final initials = _initials(title);
+    final subtitle = isPcc
+        ? loc.translate('pending_link_connection_hint')
+        : loc.translate('connecting_secure_hint');
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: _kSurfaceColor,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _kBorder.withOpacity(0.85)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.35),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        child: Row(
+          children: [
+            if (chat.avatarImage != null && chat.avatarImage!.isNotEmpty)
+              ClipOval(
+                child: Image.memory(
+                  chat.avatarImage!,
+                  width: 52,
+                  height: 52,
+                  fit: BoxFit.cover,
+                ),
+              )
+            else
+              CircleAvatar(
+                radius: 26,
+                backgroundColor: _kAvatarBg,
+                child: Text(
+                  initials,
+                  style: const TextStyle(
+                    color: _kTextPrimary,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 16,
+                  ),
+                ),
+              ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    isPcc
+                        ? loc.translate('pending_link_connection')
+                        : loc.translate('connecting_secure'),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: _kTextPrimary,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 15,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    subtitle,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: _kTextSecondary,
+                      fontSize: 12.5,
+                      height: 1.25,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            const SizedBox(
+              width: 22,
+              height: 22,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: _kAccent,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _RequestTile extends StatelessWidget {
   final ContactRequestPreview chat;
+  final Uint8List? avatarBytes;
   final VoidCallback onAccept;
   final VoidCallback onReject;
 
   const _RequestTile({
     required this.chat,
+    this.avatarBytes,
     required this.onAccept,
     required this.onReject,
   });
@@ -952,30 +1203,47 @@ class _RequestTile extends StatelessWidget {
         : parts.join(' · ');
 
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
-        color: _kQuotedBg,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: _kBorder),
+        color: _kSurfaceColor,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _kBorder.withOpacity(0.85)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.35),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            CircleAvatar(
-              radius: 22,
-              backgroundColor: _kAvatarBg,
-              child: Text(
-                initials,
-                style: const TextStyle(
-                  color: _kTextPrimary,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 14,
+            if (avatarBytes != null && avatarBytes!.isNotEmpty)
+              ClipOval(
+                child: Image.memory(
+                  avatarBytes!,
+                  width: 52,
+                  height: 52,
+                  fit: BoxFit.cover,
+                ),
+              )
+            else
+              CircleAvatar(
+                radius: 26,
+                backgroundColor: _kAvatarBg,
+                child: Text(
+                  initials,
+                  style: const TextStyle(
+                    color: _kTextPrimary,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 16,
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(width: 12),
+            const SizedBox(width: 14),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -988,46 +1256,49 @@ class _RequestTile extends StatelessWidget {
                     style: const TextStyle(
                       color: _kTextPrimary,
                       fontWeight: FontWeight.w600,
-                      fontSize: 14,
+                      fontSize: 15,
                     ),
                   ),
-                  const SizedBox(height: 2),
+                  const SizedBox(height: 4),
                   Text(
                     subtitle,
-                    maxLines: 1,
+                    maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
                       color: _kTextSecondary,
-                      fontSize: 12,
+                      fontSize: 12.5,
+                      height: 1.25,
                     ),
                   ),
                 ],
               ),
             ),
             const SizedBox(width: 8),
-            OutlinedButton(
-              style: OutlinedButton.styleFrom(
-                side: const BorderSide(color: _kBorder),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 0,
-                ),
+            TextButton(
+              style: TextButton.styleFrom(
+                foregroundColor: _kTextSecondary,
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                 minimumSize: Size.zero,
                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
               onPressed: onReject,
               child: Text(
                 loc.translate('reject'),
-                style: const TextStyle(color: _kTextSecondary),
+                style: const TextStyle(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 14,
+                ),
               ),
             ),
-            const SizedBox(width: 6),
+            const SizedBox(width: 4),
             FilledButton(
               style: FilledButton.styleFrom(
                 backgroundColor: _kAccent,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 0,
+                foregroundColor: Colors.white,
+                elevation: 0,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20),
                 ),
                 minimumSize: Size.zero,
                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -1035,7 +1306,10 @@ class _RequestTile extends StatelessWidget {
               onPressed: onAccept,
               child: Text(
                 loc.translate('accept'),
-                style: const TextStyle(color: Colors.white),
+                style: const TextStyle(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 14,
+                ),
               ),
             ),
           ],

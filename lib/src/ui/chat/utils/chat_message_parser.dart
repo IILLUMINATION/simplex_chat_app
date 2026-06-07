@@ -90,7 +90,7 @@ UiMessage? parseChatItem(Map<String, dynamic> msg, {String? filesBaseDir}) {
             rawText.trim().isEmpty &&
             (isWebm || isWebp));
     final text = hasStickerTag
-        ? rawText.replaceFirst(RegExp(r'^/sticker\\s*', caseSensitive: false), '').trim()
+        ? rawText.replaceFirst(RegExp(r'^/sticker\s*', caseSensitive: false), '').trim()
         : rawText;
     final audioItem = parseAudio(fileName, filePath, fileId, fileStatusType, fileSize, transferProgress, transferTotal);
     final decoded = decodeImage(imageData);

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -262,6 +263,18 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     );
   }
 
+  /// SimpleX: нельзя удалить активного пользователя, пока есть другие видимые профили.
+  int? _firstOtherUserId(List<Map<String, dynamic>> userInfos, int skipUserId) {
+    for (final entry in userInfos) {
+      final u = entry['user'] as Map<String, dynamic>?;
+      final id = u?['userId'] as int?;
+      if (id != null && id != skipUserId) {
+        return id;
+      }
+    }
+    return null;
+  }
+
   Future<void> _confirmDelete(int userId) async {
     final loc = AppLocalizations.of(context);
     final ok = await showDialog<bool>(
@@ -286,7 +299,32 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
 
     setState(() => _busy = true);
     final service = ref.read(tanglexServiceProvider);
-    final success = await service.deleteUser(userId);
+    var success = await service.deleteUser(userId);
+    if (!success && mounted) {
+      final current = await service.getUser();
+      final activeId = current?['userId'] as int?;
+      final users = await service.getUsers();
+      if (kDebugMode) {
+        debugPrint(
+          '[Profile] deleteUser($userId) failed; activeId=$activeId '
+          'usersCount=${users.length}',
+        );
+      }
+      if (activeId == userId && users.length > 1) {
+        final other = _firstOtherUserId(users, userId);
+        if (kDebugMode) {
+          debugPrint('[Profile] delete retry: switch to userId=$other then delete $userId');
+        }
+        if (other != null) {
+          final switched = await service.setActiveUser(other);
+          if (switched) {
+            success = await service.deleteUser(userId);
+          } else if (kDebugMode) {
+            debugPrint('[Profile] setActiveUser($other) failed, delete retry skipped');
+          }
+        }
+      }
+    }
     if (success && mounted) {
       await clearProfileData();
       // Reload user data to reflect deletion — getUser() will return null
@@ -309,6 +347,9 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     setState(() => _busy = true);
     final service = ref.read(tanglexServiceProvider);
     final success = await service.setActiveUser(userId);
+    if (!success && kDebugMode) {
+      debugPrint('[Profile] setActiveUser($userId) returned false');
+    }
     if (success && mounted) {
       // Update local cache to match the newly active user
       final newUser = await service.getUser();

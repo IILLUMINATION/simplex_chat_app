@@ -74,8 +74,21 @@ class StickerStore {
   static final StickerStore instance = StickerStore._();
 
   final List<StickerPack> _packs = [];
+  bool _hydratedFromDisk = false;
 
   List<StickerPack> get packs => List.unmodifiable(_packs);
+
+  /// Загрузить index.json с диска один раз за сессию (как [PinStore.load]).
+  Future<void> ensureLoaded() async {
+    if (_hydratedFromDisk) return;
+    await load();
+    _hydratedFromDisk = true;
+  }
+
+  /// После импорта/создания пак уже в памяти и в index.json.
+  void markHydrated() {
+    _hydratedFromDisk = true;
+  }
 
   Future<Directory> _baseDir() async {
     final docs = await getApplicationDocumentsDirectory();
@@ -191,6 +204,7 @@ class StickerStore {
 
       _packs.removeWhere((p) => p.id == pack.id);
       _packs.add(pack);
+      markHydrated();
       await save();
       return pack;
     } catch (_) {
@@ -239,6 +253,7 @@ class StickerStore {
       );
       _packs.removeWhere((p) => p.id == pack.id);
       _packs.add(pack);
+      markHydrated();
       await save();
       final manifest = {
         'packId': pack.id,

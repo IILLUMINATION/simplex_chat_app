@@ -7,7 +7,6 @@ import '../providers/persistent_store.dart';
 import 'chats_screen.dart';
 import 'debug_screen.dart';
 import 'profile_screen.dart';
-import 'settings_screen.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -84,13 +83,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
   }
 
-  void _openSettings(BuildContext context) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => const SettingsScreen()),
-    );
-  }
-
   void _openProfile(BuildContext context) {
     Navigator.push(
       context,
@@ -153,18 +145,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               onTap: () {
                 Navigator.pop(context);
                 // TODO: open search
-              },
-            ),
-            // Settings
-            ListTile(
-              leading: const Icon(Icons.settings, color: Color(0xFF808080)),
-              title: Text(
-                loc.translate('settings'),
-                style: const TextStyle(color: Color(0xFFE8E8E8)),
-              ),
-              onTap: () {
-                Navigator.pop(context);
-                _openSettings(context);
               },
             ),
             const Spacer(),
