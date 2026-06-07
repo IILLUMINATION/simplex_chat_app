@@ -135,19 +135,58 @@ class TanglexService {
       // permissions и от cloud-backup через allowBackup="false").
       final passphrase = await _getOrCreateDbPassphrase();
 
-      String initResult = '';
-      for (var attempt = 0; attempt < 3; attempt++) {
-        initResult = await _native.migrateInitKey(
-          path: pathToUse,
-          passphrase: passphrase,
-        );
-        if (!_isDbLocked(initResult)) break;
+      MigrateInitKeyResult initResult = await _attemptInit(
+        pathToUse,
+        passphrase,
+      );
+
+      // MIGRATION: пользователи, обновившиеся со старой сборки, имеют БД
+      // зашифрованную хардкоденным паролем. Если новая passphrase не
+      // подходит и SimpleX возвращает errorNotADatabase, пробуем legacy.
+      if (!initResult.ok && _isNotADatabase(initResult.response)) {
+        const legacyPassphrase = 'Tanglex_Strong_Password_12345!!!';
+        if (passphrase != legacyPassphrase) {
+          _appendLog(
+            'New passphrase rejected (errorNotADatabase). '
+            'Trying legacy hardcoded passphrase for migration…',
+          );
+          final legacyResult = await _attemptInit(pathToUse, legacyPassphrase);
+          if (legacyResult.ok) {
+            _appendLog(
+              'Opened existing DB with legacy passphrase. '
+              'Keeping it for now and persisting legacy passphrase as '
+              'the per-install key (rotating to random will require a '
+              'separate explicit migration via chat_migrate_init_key '
+              'with keepKey=1 and new passphrase).',
+            );
+            // Перезаписываем сохранённую passphrase на legacy, чтобы
+            // следующие запуски открывали БД без повторного fallback.
+            // Полная ротация ключа на random — отдельная задача, потому
+            // что требует rekey-перешифрования всей БД через native API
+            // (chat_migrate_init_key пока не предоставляет такой режим
+            // из коробки; пользовательский PIN был бы лучшим решением).
+            await _persistDbPassphrase(legacyPassphrase);
+            initResult = legacyResult;
+          } else {
+            _appendLog(
+              'Legacy passphrase also rejected. '
+              'DB is either corrupted or was created by another install.',
+            );
+          }
+        }
+      }
+
+      // Retry loop для DB-locked после первоначальной попытки.
+      for (var attempt = 0;
+          attempt < 3 && _isDbLocked(initResult.response);
+          attempt++) {
         _appendLog('DB is locked, retrying init (${attempt + 1}/3)...');
         _native.stopEventLoop();
         await Future<void>.delayed(Duration(milliseconds: 300 * (attempt + 1)));
+        initResult = await _attemptInit(pathToUse, passphrase);
       }
 
-      if (_isDbLocked(initResult)) {
+      if (_isDbLocked(initResult.response)) {
         // Hot-restart can leave the previous native core holding the DB lock.
         // Fallback to a temporary directory so dev session can continue.
         final hotPath =
@@ -157,18 +196,20 @@ class TanglexService {
         );
         await Directory(hotPath).create(recursive: true);
         pathToUse = hotPath;
-        initResult = await _native.migrateInitKey(
-          path: pathToUse,
-          passphrase: passphrase,
-        );
-        _appendLog('migrateInitKey (hot): completed');
+        initResult = await _attemptInit(pathToUse, passphrase);
+        _appendLog('migrateInitKey (hot): ok=${initResult.ok}');
       }
-      _appendLog('migrateInitKey: completed');
 
-      final normalized = initResult.toLowerCase();
-      if (normalized.contains('error') || normalized.contains('invalid')) {
-        throw Exception(initResult);
+      if (!initResult.ok) {
+        // Полностью провалился: бросаем понятное исключение, чтобы UI
+        // мог показать пользователю инструкцию.
+        throw TanglexInitException(
+          response: initResult.response,
+          isWrongKey: _isNotADatabase(initResult.response),
+        );
       }
+
+      _appendLog('migrateInitKey: completed');
 
       _receivePort = ReceivePort();
       _eventSubscription = _receivePort!.listen(_handleEvent);
@@ -193,6 +234,26 @@ class TanglexService {
       _receivePort = null;
       _native.stopEventLoop();
       rethrow;
+    }
+  }
+
+  Future<MigrateInitKeyResult> _attemptInit(
+    String path,
+    String passphrase,
+  ) async {
+    return _native.migrateInitKey(path: path, passphrase: passphrase);
+  }
+
+  /// SimpleX возвращает `errorNotADatabase` когда SQLCipher не смог
+  /// расшифровать БД ключом (или файл не БД вообще). По коду ошибки от
+  /// одного файла невозможно отличить "wrong key" от "corrupted", но
+  /// для нашей UX-цели миграции это эквивалентные ситуации.
+  bool _isNotADatabase(String response) {
+    try {
+      final json = Map<String, dynamic>.from(_decodeJson(response));
+      return json['type'] == 'errorNotADatabase';
+    } catch (_) {
+      return response.contains('errorNotADatabase');
     }
   }
 
@@ -1257,6 +1318,11 @@ class TanglexService {
     return passphrase;
   }
 
+  Future<void> _persistDbPassphrase(String passphrase) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kDbPassphraseKey, passphrase);
+  }
+
   void _logVerbose(String line) {
     if (_verboseLogs) {
       _appendLog(line);
@@ -1303,6 +1369,28 @@ class SendResult {
   final String? error;
 
   const SendResult({required this.ok, this.error});
+}
+
+/// Thrown by [TanglexService.initialize] when SimpleX core cannot open
+/// the encrypted database.
+///
+/// [isWrongKey] == true → the on-disk DB exists but cannot be decrypted
+/// with the current passphrase (after legacy fallback was attempted).
+/// This usually means a foreign install / restored backup / data
+/// corruption. UI should prompt the user with "wipe and start fresh"
+/// or "import" rather than silently retrying.
+class TanglexInitException implements Exception {
+  const TanglexInitException({
+    required this.response,
+    required this.isWrongKey,
+  });
+
+  final String response;
+  final bool isWrongKey;
+
+  @override
+  String toString() =>
+      'TanglexInitException(isWrongKey=$isWrongKey, response=$response)';
 }
 
 class ImagePayload {

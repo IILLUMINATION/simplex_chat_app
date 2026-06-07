@@ -8,6 +8,19 @@ import 'package:flutter/foundation.dart' show debugPrint, kDebugMode;
 
 import 'tanglex_bindings.dart';
 
+/// Outcome of [TanglexNative.migrateInitKey].
+///
+/// [ok] == true means native side returned a non-null chat_ctrl,
+/// the database was opened and FFI calls can proceed.
+/// [ok] == false means the call failed (wrong passphrase, corrupted DB,
+/// migration required и т.п.) — inspect [response] JSON for details.
+class MigrateInitKeyResult {
+  const MigrateInitKeyResult({required this.response, required this.ok});
+
+  final String response;
+  final bool ok;
+}
+
 /// High-level wrapper over generated [TanglexBindings].
 ///
 /// Responsibilities:
@@ -57,11 +70,14 @@ class TanglexNative {
 
   /// Initializes TangleX core and captures `chat_ctrl` from `chat_migrate_init_key`.
   ///
-  /// Returns JSON string provided by native function.
+  /// Returns [MigrateInitKeyResult] with raw native response and a success
+  /// flag. NEVER throws on a "valid native failure" (wrong passphrase,
+  /// corrupted DB и т.п.) — caller is expected to inspect [response]
+  /// and decide whether to retry / fall back / surface error to user.
   ///
   /// [confirm] must be one of: 'yesUp', 'yesUpDown', or 'error'.
   /// This is a migration confirmation, NOT a password confirmation.
-  Future<String> migrateInitKey({
+  Future<MigrateInitKeyResult> migrateInitKey({
     required String path,
     required String passphrase,
     String confirm = 'yesUp',
@@ -98,15 +114,11 @@ class TanglexNative {
       }
 
       final ctrlValue = ctrlOut.value;
-      if (ctrlValue == ffi.nullptr) {
-        // Не атачим nullptr — иначе все последующие FFI-вызовы упадут SIGSEGV.
-        throw StateError(
-          'chat_migrate_init_key returned null chat controller. '
-          'Response: $result',
-        );
+      final ok = ctrlValue != ffi.nullptr;
+      if (ok) {
+        _chatController = ctrlValue;
       }
-      _chatController = ctrlValue;
-      return result;
+      return MigrateInitKeyResult(response: result, ok: ok);
     } finally {
       malloc.free(pathPtr);
       malloc.free(passPtr);
