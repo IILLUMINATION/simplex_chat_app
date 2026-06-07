@@ -161,6 +161,22 @@ class AppLocalizations {
     'message_hint_wait_connection': 'Ожидание соединения…',
     'debug_console': 'Debug-консоль',
     'initializing': 'Инициализация...',
+
+    // Chat header & message actions
+    'chat_type_group': 'Группа',
+    'chat_type_contact': 'Контакт',
+    'chat_type_chat': 'Чат',
+    'you_label': 'Вы',
+    'audio_unavailable': 'Аудиофайл недоступен',
+    'file_not_loaded': 'Файл ещё не загружен',
+    'reply_unavailable': 'Ответ недоступен',
+    'message_not_found': 'Сообщение не найдено',
+    'message_pin': 'Закрепить',
+    'message_unpin': 'Открепить',
+    'message_copy': 'Копировать',
+    'message_reply': 'Ответить',
+    'message_copied': 'Скопировано',
+    'file_load_error': 'Ошибка загрузки файла',
   };
 
   // ========== English ==========
@@ -306,6 +322,22 @@ class AppLocalizations {
     'message_hint_wait_connection': 'Waiting for connection…',
     'debug_console': 'Debug Console',
     'initializing': 'Initializing...',
+
+    // Chat header & message actions
+    'chat_type_group': 'Group',
+    'chat_type_contact': 'Contact',
+    'chat_type_chat': 'Chat',
+    'you_label': 'You',
+    'audio_unavailable': 'Audio file is not available',
+    'file_not_loaded': 'File is not loaded yet',
+    'reply_unavailable': 'Reply is not available',
+    'message_not_found': 'Message not found',
+    'message_pin': 'Pin',
+    'message_unpin': 'Unpin',
+    'message_copy': 'Copy',
+    'message_reply': 'Reply',
+    'message_copied': 'Copied',
+    'file_load_error': 'Failed to load file',
   };
 }
 

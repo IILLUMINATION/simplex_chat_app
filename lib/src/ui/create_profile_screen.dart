@@ -43,6 +43,8 @@ class _CreateProfileScreenState extends ConsumerState<CreateProfileScreen> {
           : _shortDescrController.text.trim(),
     );
 
+    if (!mounted) return;
+    final hasError = response == null || response.containsKey('error');
     setState(() {
       _busy = false;
       if (response != null) {
@@ -50,8 +52,21 @@ class _CreateProfileScreenState extends ConsumerState<CreateProfileScreen> {
         if (response.containsKey('error')) {
           _error = response['error']?.toString() ?? _result;
         }
+      } else {
+        _error = loc.translate('initialization_error');
       }
     });
+
+    // FIX: ранее экран не закрывался после успешного создания профиля,
+    // и пользователь видел сырой JSON-дамп ответа. Теперь автоматически
+    // возвращаемся назад с флагом true, чтобы родительский экран мог
+    // подхватить новый профиль.
+    if (!hasError) {
+      // Небольшая задержка, чтобы пользователь увидел индикацию успеха.
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      if (!mounted) return;
+      Navigator.of(context).pop(true);
+    }
   }
 
   @override
@@ -132,35 +147,16 @@ class _CreateProfileScreenState extends ConsumerState<CreateProfileScreen> {
                 label: Text(loc.translate('create')),
               ),
             ),
+            // FIX: убран блок с сырым JSON ответа SimpleX-core — он не нужен
+            // пользователю и выглядел как ошибка. Успех = автоматический pop
+            // обратно (см. _createProfile).
             if (_result != null && _error == null) ...[
               const SizedBox(height: 24),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: cs.primaryContainer.withOpacity(0.3),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: cs.primaryContainer),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      loc.translate('profile_created'),
-                      style: TextStyle(
-                        color: cs.onPrimaryContainer,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    SelectableText(
-                      _result!,
-                      style: const TextStyle(
-                        fontFamily: 'monospace',
-                        fontSize: 11,
-                      ),
-                    ),
-                  ],
+              Text(
+                loc.translate('profile_created'),
+                style: TextStyle(
+                  color: cs.onPrimaryContainer,
+                  fontWeight: FontWeight.bold,
                 ),
               ),
             ],

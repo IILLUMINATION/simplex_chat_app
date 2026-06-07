@@ -7,6 +7,7 @@ import '../providers/persistent_store.dart';
 import 'chats_screen.dart';
 import 'debug_screen.dart';
 import 'profile_screen.dart';
+import 'settings_screen.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -54,14 +55,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           icon: const Icon(Icons.menu),
           onPressed: () => _scaffoldKey.currentState?.openDrawer(),
         ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.search),
-            onPressed: () {
-              // TODO: implement search
-            },
-          ),
-        ],
+        // FIX: убрана нерабочая кнопка search в AppBar.
+        // Будет возвращена когда реализуем полнотекстовый поиск по чатам.
       ),
       body: const ChatsScreen(),
       floatingActionButton: FloatingActionButton(
@@ -87,6 +82,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => const ProfileScreen()),
+    );
+  }
+
+  void _openSettings(BuildContext context) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const SettingsScreen()),
     );
   }
 
@@ -135,16 +137,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               ),
             ),
             const Divider(color: Color(0xFF333333), height: 1),
-            // Search
+            // Settings — раньше экран был полностью недоступен из UI
+            // несмотря на наличие SettingsScreen (тема/язык).
             ListTile(
-              leading: const Icon(Icons.search, color: Color(0xFF808080)),
+              leading: const Icon(Icons.settings, color: Color(0xFF808080)),
               title: Text(
-                loc.translate('search'),
+                loc.translate('settings'),
                 style: const TextStyle(color: Color(0xFFE8E8E8)),
               ),
               onTap: () {
                 Navigator.pop(context);
-                // TODO: open search
+                _openSettings(context);
               },
             ),
             const Spacer(),

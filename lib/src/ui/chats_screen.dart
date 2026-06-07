@@ -774,7 +774,9 @@ class _ChatTile extends StatelessWidget {
         : loc.translate('no_messages_yet');
     final hasUnread = chat.unreadCount > 0;
     final isOutgoing = chat.lastFromMe;
-    final previewText = isOutgoing ? 'Вы: $lastMsg' : lastMsg;
+    final previewText = isOutgoing
+        ? '${loc.translate('you_label')}: $lastMsg'
+        : lastMsg;
 
     return Material(
       color: _kTileColor,

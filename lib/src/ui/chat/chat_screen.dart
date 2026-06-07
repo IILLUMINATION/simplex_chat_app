@@ -60,10 +60,12 @@ class _ChatHeader extends StatelessWidget {
     required this.textSecondary,
   });
 
-  String _subtitle() {
-    if (chatType == 'group') return 'Группа';
-    if (chatType == 'contact') return 'Контакт';
-    return 'Чат';
+  String _subtitle(AppLocalizations loc) {
+    // FIX: ранее были хардкодные русские строки. Английский пользователь
+    // видел "Группа" / "Контакт" / "Чат" вместо локализованной строки.
+    if (chatType == 'group') return loc.translate('chat_type_group');
+    if (chatType == 'contact') return loc.translate('chat_type_contact');
+    return loc.translate('chat_type_chat');
   }
 
   String _initials() {
@@ -85,6 +87,7 @@ class _ChatHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final loc = AppLocalizations.of(context);
     return Row(
       children: [
         const SizedBox(width: 4),
@@ -123,7 +126,7 @@ class _ChatHeader extends StatelessWidget {
               ),
               const SizedBox(height: 2),
               Text(
-                _subtitle(),
+                _subtitle(loc),
                 style: TextStyle(color: textSecondary, fontSize: 12),
                 overflow: TextOverflow.ellipsis,
               ),
@@ -695,7 +698,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final nameCtrl = TextEditingController();
     final idCtrl = TextEditingController();
     final authorCtrl = TextEditingController();
-    await showDialog<void>(
+    // FIX: ранее Cancel и Next имели одинаковый onPressed (`pop()` без
+    // возврата значения), и после диалога код всегда переходил к picker'у,
+    // если поля были заполнены. Теперь возвращаем bool, чтобы явно
+    // отличить отмену от подтверждения.
+    final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) {
         return AlertDialog(
@@ -730,17 +737,18 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.of(ctx).pop(),
+              onPressed: () => Navigator.of(ctx).pop(false),
               child: Text(loc.translate('cancel')),
             ),
             TextButton(
-              onPressed: () => Navigator.of(ctx).pop(),
+              onPressed: () => Navigator.of(ctx).pop(true),
               child: Text(loc.translate('sticker_next')),
             ),
           ],
         );
       },
     );
+    if (confirmed != true) return null;
     final name = nameCtrl.text.trim();
     final id = idCtrl.text.trim();
     if (name.isEmpty || id.isEmpty) return null;
@@ -812,9 +820,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     if (audio.filePath == null) return;
     if (!File(audio.filePath!).existsSync()) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Аудиофайл недоступен')));
+        final loc = AppLocalizations.of(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(loc.translate('audio_unavailable'))),
+        );
       }
       return;
     }
@@ -852,9 +861,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final img = images[index];
     if (img.isVideo && !img.isCircle) {
       if (img.filePath == null) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Файл ещё не загружен')));
+        final loc = AppLocalizations.of(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(loc.translate('file_not_loaded'))),
+        );
         return;
       }
       Navigator.of(context).push(
@@ -1092,9 +1102,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           _showMessageOptions(ctx, d.globalPosition, m, isPinned),
       onSwipeReply: () {
         if (m.itemId == null) {
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(const SnackBar(content: Text('Ответ недоступен')));
+          final loc = AppLocalizations.of(context);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(loc.translate('reply_unavailable'))),
+          );
           return;
         }
         setState(() => _replyTo = m);
@@ -1130,20 +1141,21 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   }
 
   void _scrollToMessageByItemId(int itemId) {
+    final loc = AppLocalizations.of(context);
     // Ищем сообщение с нужным itemId в _messages
     final idx = _messages.indexWhere((m) => m.itemId == itemId);
     if (idx == -1) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Сообщение не найдено')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(loc.translate('message_not_found'))),
+      );
       return;
     }
     final target = _messages[idx];
     final displayIdx = _displayIndexByKey[target.key];
     if (displayIdx == null) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Сообщение не найдено')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(loc.translate('message_not_found'))),
+      );
       return;
     }
     if (!_itemScrollController.isAttached) return;
@@ -1191,6 +1203,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     UiMessage m,
     bool isPinned,
   ) async {
+    final loc = AppLocalizations.of(ctx);
     final screenH = MediaQuery.of(ctx).size.height;
     final screenW = MediaQuery.of(ctx).size.width;
     final menuW = 210.0;
@@ -1207,7 +1220,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                 size: 20,
               ),
               const SizedBox(width: 12),
-              Text(isPinned ? 'Открепить' : 'Закрепить'),
+              Text(loc.translate(isPinned ? 'message_unpin' : 'message_pin')),
             ],
           ),
         ),
@@ -1215,26 +1228,26 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     }
     if (m.text.isNotEmpty) {
       items.add(
-        const PopupMenuItem<String>(
+        PopupMenuItem<String>(
           value: 'copy',
           child: Row(
             children: [
-              Icon(Icons.copy, size: 20),
-              SizedBox(width: 12),
-              Text('Копировать'),
+              const Icon(Icons.copy, size: 20),
+              const SizedBox(width: 12),
+              Text(loc.translate('message_copy')),
             ],
           ),
         ),
       );
     }
     items.add(
-      const PopupMenuItem<String>(
+      PopupMenuItem<String>(
         value: 'reply',
         child: Row(
           children: [
-            Icon(Icons.reply, size: 20),
-            SizedBox(width: 12),
-            Text('Ответить'),
+            const Icon(Icons.reply, size: 20),
+            const SizedBox(width: 12),
+            Text(loc.translate('message_reply')),
           ],
         ),
       ),
@@ -1283,15 +1296,15 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       } else if (value == 'copy') {
         Clipboard.setData(ClipboardData(text: m.text));
         if (mounted) {
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(const SnackBar(content: Text('Скопировано')));
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(loc.translate('message_copied'))),
+          );
         }
       } else if (value == 'reply') {
         if (m.itemId == null) {
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(const SnackBar(content: Text('Ответ недоступен')));
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(loc.translate('reply_unavailable'))),
+          );
           return;
         }
         setState(() => _replyTo = m);
@@ -1345,9 +1358,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     } catch (e) {
       debugPrint('Error requesting file: $e');
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Ошибка загрузки файла')));
+        final loc = AppLocalizations.of(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(loc.translate('file_load_error'))),
+        );
       }
     }
   }
@@ -1594,7 +1608,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                                       children: [
                                         Text(
                                           _replyTo!.fromMe
-                                              ? 'Вы'
+                                              ? AppLocalizations.of(context)
+                                                    .translate('you_label')
                                               : widget.chatName,
                                           style: const TextStyle(
                                             fontSize: 12,
