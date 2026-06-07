@@ -22,7 +22,11 @@ if (keystorePropertiesFile.exists()) {
 
 android {
     namespace = "com.tanglex.chat"
-    compileSdk = 35
+    // Bumped from 35 to 36 — required by camera_android_camerax,
+    // flutter_plugin_android_lifecycle, image_picker_android,
+    // shared_preferences_android, video_player_android (transitive
+    // androidx.activity:1.12.x, androidx.core:1.18.x).
+    compileSdk = 36
 
     ndkVersion = "28.2.13676358"
 
@@ -38,7 +42,9 @@ android {
     defaultConfig {
         applicationId = "com.tanglex.chat"
         minSdk = 24
-        targetSdk = 35
+        // targetSdk also bumped to 36 to match compileSdk and stay aligned
+        // with Play Console requirements for new apps in 2026.
+        targetSdk = 36
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }
