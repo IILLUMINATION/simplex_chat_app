@@ -316,3 +316,58 @@ For every PR touching UI:
 - [ ] All controllers/streams disposed in `dispose`
 - [ ] `flutter analyze` clean (0 errors, 0 warnings)
 - [ ] `flutter build apk --debug` succeeds
+
+---
+
+## 14. Known deviations / TODOs
+
+These are intentionally deferred and tracked here so future contributors do
+not file them as bugs:
+
+1. **`persistent_store.dart` last-message previews** use emoji glyphs
+   (`📷 / 🎬 / 🎤 / 🖼️ / 📎 / 🔗 / ⚠️ / 💬`) instead of localised words.
+   The parser has no `BuildContext`. A proper fix would return a typed
+   enum and translate in `ChatsScreen._ChatTile`.
+2. **Markdown code-block syntax-highlight palette** in
+   `message_widgets.dart` keeps its own 22-color palette (one pair per
+   token / language). It is intentionally NOT in tokens.dart — these
+   colors are a parallel concern from the chat-UI palette, on par with
+   how Telegram has its own code-block scheme.
+3. **Inline voice recorder** (`tap mic = inline voice`,
+   `long-press = video circle`) is not in this branch. It needs the
+   `record` package and a runtime-permission dance; it will land in a
+   follow-up branch.
+4. **Light theme** is not implemented. The token file is structured so
+   that a parallel light variant can be added later without touching
+   feature code.
+5. **`StickerPickerSheet`** still uses Material `ColorScheme` for the
+   pack-thumbnails selection state (rather than `AppColors` directly).
+   Since the entire app is dark-only the ColorScheme resolves into the
+   same surfaces — visually correct, but technically a small token-bypass.
+
+## 15. Migration progress
+
+As of this branch (`feat/design-system`):
+
+| Area                  | Token-only | Notes                              |
+|-----------------------|------------|------------------------------------|
+| `tokens.dart`         | n/a        | Source of truth                    |
+| `typography.dart`     | n/a        | Source of truth                    |
+| `theme.dart`          | yes        | Single dark ThemeData              |
+| `HomeScreen` / Drawer | yes        |                                    |
+| `ChatsScreen`         | yes        | Locale-aware weekday labels        |
+| `ChatScreen`          | yes        | Telegram-style blurred AppBar      |
+| `MessageBubble`       | yes        | Incoming / outgoing now distinct   |
+| `AudioMiniPlayer`     | yes        |                                    |
+| `AudioBubble`         | yes        |                                    |
+| `MediaGrid`           | partial    | Token-aware but not fully audited  |
+| `VideoCircle`         | partial    | Same                               |
+| `StickerView`         | partial    | Same                               |
+| `GalleryView`         | yes        | Action sheet uses `AppSheet`       |
+| `VideoPlayerScreen`   | yes        |                                    |
+| `ProfileScreen`       | yes        |                                    |
+| `CreateProfileScreen` | yes        |                                    |
+| `SettingsScreen`      | yes        | Locale-only (theme is fixed)       |
+| `DebugScreenWrapper`  | yes        |                                    |
+| `StickerPickerSheet`  | partial    | See § 14.5                         |
+| Markdown code blocks  | partial    | See § 14.2                         |
