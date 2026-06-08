@@ -257,17 +257,18 @@ class VideoCircle extends StatefulWidget {
 
 class _VideoCircleState extends State<VideoCircle> {
   VideoPlayerController? _controller;
+  bool _initRequested = false;
 
   @override
   void initState() {
     super.initState();
-    if (widget.image.filePath != null) {
-      _controller = VideoPlayerController.file(File(widget.image.filePath!))
-        ..initialize().then((_) {
-          if (!mounted) return;
-          setState(() {});
-        });
-    }
+    // FIX: ранее VideoPlayerController создавался для КАЖДОГО кружка в
+    // чате сразу при скролле. Это:
+    //  - открывало MediaCodec на каждое сообщение (VP9 декодер
+    //    потребляет ощутимый GPU/CPU и спамит logcat);
+    //  - забирало AudioFocus у системного плеера, прерывая музыку.
+    // Теперь контроллер инициализируется лениво — только когда
+    // пользователь тапнул по кружку (см. _toggle).
   }
 
   @override
@@ -276,13 +277,30 @@ class _VideoCircleState extends State<VideoCircle> {
     if (oldWidget.image.filePath != widget.image.filePath) {
       _controller?.dispose();
       _controller = null;
-      if (widget.image.filePath != null) {
-        _controller = VideoPlayerController.file(File(widget.image.filePath!))
-          ..initialize().then((_) {
-            if (!mounted) return;
-            setState(() {});
-          });
+      _initRequested = false;
+    }
+  }
+
+  Future<void> _ensureInitialized() async {
+    if (_initRequested) return;
+    _initRequested = true;
+    if (widget.image.filePath == null) return;
+    final controller = VideoPlayerController.file(File(widget.image.filePath!));
+    _controller = controller;
+    try {
+      await controller.initialize();
+      // Кружок «как в телеге» — без звука у получателя по умолчанию
+      // (озвучка в SimpleX доставляется отдельным voice-сообщением).
+      // Тем самым ещё и не прерываем стороннюю музыку.
+      await controller.setVolume(0);
+      if (!mounted) {
+        await controller.dispose();
+        _controller = null;
+        return;
       }
+      setState(() {});
+    } catch (_) {
+      _controller = null;
     }
   }
 
@@ -292,9 +310,18 @@ class _VideoCircleState extends State<VideoCircle> {
     super.dispose();
   }
 
-  void _toggle() {
-    final ctrl = _controller;
-    if (ctrl == null) return;
+  Future<void> _toggle() async {
+    // Lazy-init: контроллер появляется только после первого тапа.
+    if (_controller == null) {
+      await _ensureInitialized();
+      final fresh = _controller;
+      if (fresh != null && fresh.value.isInitialized) {
+        await fresh.play();
+        if (mounted) setState(() {});
+      }
+      return;
+    }
+    final ctrl = _controller!;
     if (!ctrl.value.isInitialized) return;
     if (ctrl.value.isPlaying) {
       ctrl.pause();
@@ -447,18 +474,35 @@ class StickerView extends StatelessWidget {
   Widget build(BuildContext context) {
     const size = 140.0;
     Widget child;
+    // FIX: ранее webm-стикеры рендерились через StickerWebm, который
+    // создавал VideoPlayerController → MediaCodec → Surface. Это:
+    //  1) поднимало AudioFocus на устройстве и **прерывало музыку**
+    //     в стороннем плеере (setVolume(0) не отменяет audio focus
+    //     на Android — это особенность MediaPlayer/ExoPlayer);
+    //  2) спамило logcat сообщениями mali_gralloc register/unregister
+    //     на каждый кадр декодера VP9;
+    //  3) на нескольких стикерах в чате создавало по MediaCodec на
+    //     каждый, что выедало GPU и приводило к "Skipped N frames".
+    //
+    // Полноценная WebM-анимация на Flutter без нативного декодера
+    // невозможна без больших жертв (apng/lottie/ffmpeg). Поэтому
+    // отображаем первый кадр webm как статичный thumbnail через
+    // video_thumbnail (вызывается один раз, кэшируется). Это решает
+    // все три проблемы сразу.
     if (image.isWebm && image.filePath != null) {
-      child = StickerWebm(filePath: image.filePath!);
+      child = StickerThumb(filePath: image.filePath!);
     } else if (image.filePath != null) {
       child = Image.file(
         File(image.filePath!),
         fit: BoxFit.contain,
+        gaplessPlayback: true,
         errorBuilder: (_, __, ___) => const SizedBox.shrink(),
       );
     } else if (image.bytes != null) {
       child = Image.memory(
         image.bytes!,
         fit: BoxFit.contain,
+        gaplessPlayback: true,
         errorBuilder: (_, __, ___) => const SizedBox.shrink(),
       );
     } else {
@@ -622,135 +666,11 @@ class _VideoThumbState extends State<_VideoThumb> {
   }
 }
 
-class StickerWebm extends StatefulWidget {
-  final String filePath;
-
-  const StickerWebm({required this.filePath});
-
-  @override
-  State<StickerWebm> createState() => _StickerWebmState();
-}
-
-class _StickerWebmState extends State<StickerWebm> {
-  Future<Uint8List?>? _future;
-  VideoPlayerController? _controller;
-  bool _ready = false;
-  bool _failed = false;
-  VoidCallback? _loopListener;
-
-  @override
-  void initState() {
-    super.initState();
-    _initFuture();
-    _initController();
-  }
-
-  @override
-  void didUpdateWidget(StickerWebm oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.filePath != widget.filePath) {
-      _initFuture();
-      _disposeController();
-      _initController();
-    }
-  }
-
-  void _initFuture() {
-    final path = widget.filePath;
-    if (_thumbCache.containsKey(path)) return;
-    if (_thumbInProgress.contains(path)) return;
-    _thumbInProgress.add(path);
-    _future = _generateThumb(path, 280, 75).whenComplete(() {
-      _thumbInProgress.remove(path);
-    });
-  }
-
-  Future<void> _initController() async {
-    final file = File(widget.filePath);
-    if (!file.existsSync()) return;
-    final controller = VideoPlayerController.file(file);
-    _controller = controller;
-    try {
-      await controller.initialize();
-      await controller.setLooping(true);
-      await controller.setVolume(0);
-      await controller.play();
-      _loopListener = () {
-        final c = _controller;
-        if (c == null || !c.value.isInitialized) return;
-        final v = c.value;
-        if (!v.isPlaying &&
-            v.duration.inMilliseconds > 0 &&
-            v.position.inMilliseconds >=
-                v.duration.inMilliseconds - 60) {
-          c.seekTo(Duration.zero);
-          c.play();
-        }
-      };
-      controller.addListener(_loopListener!);
-      if (mounted) setState(() => _ready = true);
-    } catch (_) {
-      if (mounted) setState(() => _failed = true);
-    }
-  }
-
-  void _disposeController() {
-    if (_loopListener != null) {
-      _controller?.removeListener(_loopListener!);
-      _loopListener = null;
-    }
-    _controller?.dispose();
-    _controller = null;
-    _ready = false;
-    _failed = false;
-  }
-
-  @override
-  void dispose() {
-    _disposeController();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (_ready && _controller != null) {
-      final size = _controller!.value.size;
-      return FittedBox(
-        fit: BoxFit.contain,
-        child: SizedBox(
-          width: size.width,
-          height: size.height,
-          child: VideoPlayer(_controller!),
-        ),
-      );
-    }
-    if (_failed) {
-      return const ColoredBox(color: Colors.black12);
-    }
-    final cached = _thumbCache[widget.filePath];
-    if (cached != null) {
-      return Image.memory(
-        cached,
-        fit: BoxFit.contain,
-        errorBuilder: (_, __, ___) => const ColoredBox(color: Colors.black12),
-      );
-    }
-    return FutureBuilder<Uint8List?>(
-      future: _future,
-      builder: (context, snap) {
-        final data = snap.data;
-        if (data != null) {
-          return Image.memory(
-            data,
-            fit: BoxFit.contain,
-            errorBuilder: (_, __, ___) => const ColoredBox(color: Colors.black12),
-          );
-        }
-        return const ColoredBox(color: Colors.black12);
-      },
-    );
-  }
-}
+// NOTE: класс StickerWebm удалён. См. комментарий в StickerView выше:
+// рендеринг webm-стикеров через VideoPlayerController вызывал
+// прерывание музыки на устройстве (Android audio focus), спам
+// mali_gralloc в logcat и фризы UI ("Skipped N frames"). Теперь
+// webm-стикер отображается как статичный первый кадр через StickerThumb.
 
 class RingProgressPainter extends CustomPainter {
   final double progress;
