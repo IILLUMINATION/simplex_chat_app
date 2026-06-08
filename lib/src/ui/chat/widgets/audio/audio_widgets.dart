@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:just_audio/just_audio.dart';
 
+import '../../../design/design.dart';
 import '../../models/chat_message_models.dart';
 
 class AudioMiniPlayer extends StatelessWidget {
@@ -19,10 +20,10 @@ class AudioMiniPlayer extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: const Color(0xFF111111),
+        color: AppColors.surface1,
         border: const Border(
           bottom: BorderSide(
-            color: Color(0xFF333333),
+            color: AppColors.divider,
           ),
         ),
       ),
@@ -36,7 +37,7 @@ class AudioMiniPlayer extends StatelessWidget {
                 onPressed: () => playing ? player.pause() : player.play(),
                 icon: Icon(
                   playing ? Icons.pause : Icons.play_arrow,
-                  color: const Color(0xFF5A9CF5),
+                  color: AppColors.accent,
                 ),
               );
             },
@@ -51,7 +52,7 @@ class AudioMiniPlayer extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
-                    color: Color(0xFFE8E8E8),
+                    color: AppColors.textPrimary,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
@@ -74,9 +75,9 @@ class AudioMiniPlayer extends StatelessWidget {
                                 trackHeight: 3,
                                 thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 5),
                                 overlayShape: const RoundSliderOverlayShape(overlayRadius: 10),
-                                activeTrackColor: const Color(0xFF5A9CF5),
-                                inactiveTrackColor: const Color(0xFF333333),
-                                thumbColor: const Color(0xFF5A9CF5),
+                                activeTrackColor: AppColors.accent,
+                                inactiveTrackColor: AppColors.divider,
+                                thumbColor: AppColors.accent,
                               ),
                               child: Slider(
                                 value: value,
@@ -94,11 +95,11 @@ class AudioMiniPlayer extends StatelessWidget {
                               children: [
                                 Text(_fmt(pos),
                                     style: const TextStyle(
-                                      color: Color(0xFF808080),
+                                      color: AppColors.textSecondary,
                                     )),
                                 Text(_fmt(dur),
                                     style: const TextStyle(
-                                      color: Color(0xFF808080),
+                                      color: AppColors.textSecondary,
                                     )),
                               ],
                             ),
@@ -113,7 +114,7 @@ class AudioMiniPlayer extends StatelessWidget {
           ),
           IconButton(
             onPressed: onClose,
-            icon: const Icon(Icons.close, color: Color(0xFF808080)),
+            icon: const Icon(Icons.close, color: AppColors.textSecondary),
           ),
         ],
       ),
@@ -166,8 +167,8 @@ class AudioBubble extends StatelessWidget {
         audio.transferProgress != null;
     final progress = showProgress ? (audio.transferProgress! / audio.transferTotal!) : null;
     final playBtnBg = fromMe
-        ? const Color(0xFF5A9CF5)
-        : const Color(0xFF2A2A2A);
+        ? AppColors.accent
+        : AppColors.surface3;
 
     return StreamBuilder<PlayerState>(
       stream: audioPlayer.playerStateStream,
@@ -191,7 +192,7 @@ class AudioBubble extends StatelessWidget {
                   alignment: Alignment.center,
                   children: [
                     if (awaitingSender)
-                      const Icon(Icons.hourglass_empty, color: Color(0xFF5A9CF5), size: 18),
+                      const Icon(Icons.hourglass_empty, color: AppColors.accent, size: 18),
                     if (!awaitingSender && (isMissing || showProgress))
                       SizedBox(
                         width: 26,
@@ -199,12 +200,12 @@ class AudioBubble extends StatelessWidget {
                         child: CircularProgressIndicator(
                           strokeWidth: 2,
                           value: progress,
-                          color: const Color(0xFF5A9CF5),
+                          color: AppColors.accent,
                         ),
                       ),
                     Icon(
                       isMissing ? Icons.download : (showPause ? Icons.pause : Icons.play_arrow),
-                      color: fromMe ? Colors.white : const Color(0xFF5A9CF5),
+                      color: fromMe ? Colors.white : AppColors.accent,
                       size: 20,
                     ),
                   ],
@@ -230,7 +231,7 @@ class AudioBubble extends StatelessWidget {
                   Text(
                     _buildSubtitle(),
                     style: theme.textTheme.bodySmall?.copyWith(
-                      color: isCurrent && playing ? const Color(0xFF5A9CF5) : subtitleColor,
+                      color: isCurrent && playing ? AppColors.accent : subtitleColor,
                       fontSize: 11,
                     ),
                   ),

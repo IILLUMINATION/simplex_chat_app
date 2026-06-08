@@ -179,6 +179,21 @@ class AppLocalizations {
     'message_reply': 'Ответить',
     'message_copied': 'Скопировано',
     'file_load_error': 'Ошибка загрузки файла',
+    'file_open_failed': 'Не удалось открыть файл: %s',
+    'file_open_no_app': 'Нет приложения для открытия файла',
+    'file_waiting_sender': 'Ожидает отправителя',
+    'pinned_label': 'Закреплённое',
+    'viewer_save_to_gallery': 'Сохранить в галерею',
+    'viewer_share': 'Поделиться',
+    'viewer_copy_path': 'Скопировать путь',
+    'viewer_saved': 'Сохранено в галерею',
+    'viewer_save_unavailable': 'Сохранение недоступно. Перезапустите приложение.',
+    'viewer_save_failed': 'Не удалось сохранить: %s',
+    'viewer_share_failed': 'Не удалось поделиться: %s',
+    'viewer_path_copied': 'Путь скопирован',
+    'media_placeholder': '(медиа)',
+    'attach_tooltip': 'Прикрепить',
+    'more_tooltip': 'Ещё',
   };
 
   // ========== English ==========
@@ -342,6 +357,21 @@ class AppLocalizations {
     'message_reply': 'Reply',
     'message_copied': 'Copied',
     'file_load_error': 'Failed to load file',
+    'file_open_failed': 'Could not open file: %s',
+    'file_open_no_app': 'No application available to open this file',
+    'file_waiting_sender': 'Waiting for sender',
+    'pinned_label': 'Pinned',
+    'viewer_save_to_gallery': 'Save to gallery',
+    'viewer_share': 'Share',
+    'viewer_copy_path': 'Copy path',
+    'viewer_saved': 'Saved to gallery',
+    'viewer_save_unavailable': 'Save is unavailable. Please restart the app.',
+    'viewer_save_failed': 'Failed to save: %s',
+    'viewer_share_failed': 'Failed to share: %s',
+    'viewer_path_copied': 'Path copied',
+    'media_placeholder': '(media)',
+    'attach_tooltip': 'Attach',
+    'more_tooltip': 'More',
   };
 }
 

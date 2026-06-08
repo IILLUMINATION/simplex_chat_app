@@ -7,14 +7,16 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:video_player/video_player.dart';
 
+import '../../../../localization/app_localizations.dart';
+import '../../../design/design.dart';
 import '../../models/chat_message_models.dart';
 import 'media_widgets.dart' show thumbCache, generateVideoThumb;
 
 class GalleryView extends StatefulWidget {
+  const GalleryView({super.key, required this.images, required this.initial});
+
   final List<UiImage> images;
   final int initial;
-
-  const GalleryView({required this.images, required this.initial});
 
   @override
   State<GalleryView> createState() => _GalleryViewState();
@@ -45,7 +47,7 @@ class _GalleryViewState extends State<GalleryView> {
       if (cached != null) {
         return Image.memory(
           cached,
-          errorBuilder: (_, __, ___) => const ColoredBox(color: Colors.black12),
+          errorBuilder: (_, _, _) => const ColoredBox(color: Colors.black12),
         );
       }
       final future = generateVideoThumb(path, 600, 80);
@@ -58,7 +60,7 @@ class _GalleryViewState extends State<GalleryView> {
           }
           return Image.memory(
             data,
-            errorBuilder: (_, __, ___) =>
+            errorBuilder: (_, _, _) =>
                 const ColoredBox(color: Colors.black12),
           );
         },
@@ -67,12 +69,12 @@ class _GalleryViewState extends State<GalleryView> {
     if (img.filePath != null) {
       return Image.file(
         File(img.filePath!),
-        errorBuilder: (_, __, ___) => const ColoredBox(color: Colors.black12),
+        errorBuilder: (_, _, _) => const ColoredBox(color: Colors.black12),
       );
     }
     return Image.memory(
       img.bytes!,
-      errorBuilder: (_, __, ___) => const ColoredBox(color: Colors.black12),
+      errorBuilder: (_, _, _) => const ColoredBox(color: Colors.black12),
     );
   }
 
@@ -85,7 +87,7 @@ class _GalleryViewState extends State<GalleryView> {
         foregroundColor: Colors.white,
         actions: [
           IconButton(
-            icon: const Icon(Icons.more_vert),
+            icon: const Icon(Icons.more_vert_rounded),
             onPressed: () => _showImageActions(widget.images[_currentIndex]),
           ),
         ],
@@ -103,55 +105,46 @@ class _GalleryViewState extends State<GalleryView> {
   }
 
   Future<void> _showImageActions(UiImage img) async {
-    await showModalBottomSheet(
+    final loc = AppLocalizations.of(context);
+    await showAppSheet<void>(
       context: context,
-      backgroundColor: const Color(0xFF111111),
-      builder: (ctx) {
-        return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ListTile(
-                leading: const Icon(Icons.download, color: Colors.white),
-                title: Text(
-                  'Сохранить в галерею',
-                  style: const TextStyle(color: Colors.white),
-                ),
-                onTap: () async {
-                  Navigator.of(ctx).pop();
-                  await _saveToGallery(img);
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.share, color: Colors.white),
-                title: Text(
-                  'Поделиться',
-                  style: const TextStyle(color: Colors.white),
-                ),
-                onTap: () async {
-                  Navigator.of(ctx).pop();
-                  await _shareImage(img);
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.copy, color: Colors.white),
-                title: Text(
-                  'Скопировать путь',
-                  style: const TextStyle(color: Colors.white),
-                ),
-                onTap: () async {
-                  Navigator.of(ctx).pop();
-                  await _copyPath(img);
-                },
-              ),
-            ],
-          ),
-        );
-      },
+      builder: (ctx) => AppSheet(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.download_rounded),
+              title: Text(loc.translate('viewer_save_to_gallery')),
+              onTap: () async {
+                Navigator.of(ctx).pop();
+                await _saveToGallery(img);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.share_rounded),
+              title: Text(loc.translate('viewer_share')),
+              onTap: () async {
+                Navigator.of(ctx).pop();
+                await _shareImage(img);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.copy_rounded),
+              title: Text(loc.translate('viewer_copy_path')),
+              onTap: () async {
+                Navigator.of(ctx).pop();
+                await _copyPath(img);
+              },
+            ),
+            const SizedBox(height: AppSpacing.s2),
+          ],
+        ),
+      ),
     );
   }
 
   Future<void> _saveToGallery(UiImage img) async {
+    final loc = AppLocalizations.of(context);
     try {
       if (img.filePath != null && img.filePath!.isNotEmpty) {
         await ImageGallerySaver.saveFile(img.filePath!);
@@ -161,28 +154,34 @@ class _GalleryViewState extends State<GalleryView> {
         return;
       }
       if (mounted) {
-        ScaffoldMessenger.of(
+        showAppSnack(
           context,
-        ).showSnackBar(const SnackBar(content: Text('Сохранено в галерею')));
+          message: loc.translate('viewer_saved'),
+          kind: AppSnackKind.success,
+        );
       }
     } on MissingPluginException {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Сохранение недоступно. Перезапусти приложение.'),
-          ),
+        showAppSnack(
+          context,
+          message: loc.translate('viewer_save_unavailable'),
+          kind: AppSnackKind.error,
         );
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
+        showAppSnack(
           context,
-        ).showSnackBar(SnackBar(content: Text('Не удалось сохранить: $e')));
+          message:
+              loc.translate('viewer_save_failed').replaceAll('%s', '$e'),
+          kind: AppSnackKind.error,
+        );
       }
     }
   }
 
   Future<void> _shareImage(UiImage img) async {
+    final loc = AppLocalizations.of(context);
     try {
       if (img.filePath != null && img.filePath!.isNotEmpty) {
         await Share.shareXFiles([XFile(img.filePath!)]);
@@ -198,28 +197,34 @@ class _GalleryViewState extends State<GalleryView> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
+        showAppSnack(
           context,
-        ).showSnackBar(SnackBar(content: Text('Не удалось поделиться: $e')));
+          message:
+              loc.translate('viewer_share_failed').replaceAll('%s', '$e'),
+          kind: AppSnackKind.error,
+        );
       }
     }
   }
 
   Future<void> _copyPath(UiImage img) async {
     if (img.filePath == null || img.filePath!.isEmpty) return;
+    final loc = AppLocalizations.of(context);
     await Clipboard.setData(ClipboardData(text: img.filePath!));
     if (mounted) {
-      ScaffoldMessenger.of(
+      showAppSnack(
         context,
-      ).showSnackBar(const SnackBar(content: Text('Путь скопирован')));
+        message: loc.translate('viewer_path_copied'),
+        kind: AppSnackKind.success,
+      );
     }
   }
 }
 
 class VideoPlayerScreen extends StatefulWidget {
-  final String filePath;
+  const VideoPlayerScreen({super.key, required this.filePath});
 
-  const VideoPlayerScreen({required this.filePath});
+  final String filePath;
 
   @override
   State<VideoPlayerScreen> createState() => _VideoPlayerScreenState();

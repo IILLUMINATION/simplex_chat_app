@@ -20,6 +20,8 @@ import 'package:open_filex/open_filex.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../../data/pin_store.dart' show PinnedMessage;
+import '../../../../localization/app_localizations.dart';
+import '../../../design/design.dart';
 import '../../models/chat_message_models.dart';
 import '../audio/audio_widgets.dart';
 import '../media/media_widgets.dart';
@@ -60,10 +62,14 @@ class MessageBubble extends StatelessWidget {
     final status = message.status;
     final timeStr = message.timeStr;
 
-    final incomingBubble = const Color(0xFF191919);
-    final outgoingBubble = const Color(0xFF191919);
-    final textPrimary = const Color(0xFFE8E8E8);
-    final textSecondary = const Color(0xFF808080);
+    const incomingBubble = AppColors.incomingBubble;
+    const outgoingBubble = AppColors.outgoingBubble;
+    final textPrimary = fromMe
+        ? AppColors.outgoingBubbleText
+        : AppColors.incomingBubbleText;
+    final textSecondary = fromMe
+        ? AppColors.outgoingBubbleSecondary
+        : AppColors.incomingBubbleSecondary;
 
     final isVideoOnly =
         message.images.length == 1 &&
@@ -108,21 +114,9 @@ class MessageBubble extends StatelessWidget {
             color: hasSticker || isBigEmoji ? Colors.transparent : bubbleColor,
             borderRadius: hasSticker || isBigEmoji
                 ? null
-                : BorderRadius.only(
-                    topLeft: const Radius.circular(18),
-                    topRight: const Radius.circular(18),
-                    bottomLeft: Radius.circular(fromMe ? 18 : 4),
-                    bottomRight: Radius.circular(fromMe ? 4 : 18),
-                  ),
-            boxShadow: hasSticker || isBigEmoji
-                ? null
-                : [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.25),
-                      blurRadius: 8,
-                      offset: const Offset(0, 2),
-                    ),
-                  ],
+                : (fromMe
+                    ? AppRadius.bubbleOutgoing
+                    : AppRadius.bubbleIncoming),
           ),
           child: Column(
             crossAxisAlignment: fromMe
@@ -175,10 +169,10 @@ class MessageBubble extends StatelessWidget {
                     margin: const EdgeInsets.only(bottom: 6),
                     padding: const EdgeInsets.fromLTRB(10, 7, 10, 7),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF303030),
+                      color: AppColors.quotedBg,
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(
-                        color: const Color(0xFF3A3A3A),
+                        color: AppColors.border,
                         width: 1,
                       ),
                     ),
@@ -189,7 +183,7 @@ class MessageBubble extends StatelessWidget {
                           height: 28,
                           margin: const EdgeInsets.only(right: 8),
                           decoration: BoxDecoration(
-                            color: const Color(0xFF5A9CF5),
+                            color: AppColors.accent,
                             borderRadius: BorderRadius.circular(2),
                           ),
                         ),
@@ -201,11 +195,14 @@ class MessageBubble extends StatelessWidget {
                               Text(
                                 message.quoted!.senderName.isNotEmpty
                                     ? message.quoted!.senderName
-                                    : (fromMe ? 'Вы' : ''),
+                                    : (fromMe
+                                        ? AppLocalizations.of(context)
+                                            .translate('you_label')
+                                        : ''),
                                 style: TextStyle(
                                   fontSize: 12,
                                   fontWeight: FontWeight.w600,
-                                  color: const Color(0xFF5A9CF5),
+                                  color: AppColors.accent,
                                 ),
                               ),
                               const SizedBox(height: 1),
@@ -378,13 +375,13 @@ class _SwipeReplyWrapperState extends State<SwipeReplyWrapper>
                     width: 26,
                     height: 26,
                     decoration: const BoxDecoration(
-                      color: Color(0xFF2A2A2A),
+                      color: AppColors.surface3,
                       shape: BoxShape.circle,
                     ),
                     child: const Icon(
                       Icons.reply,
                       size: 14,
-                      color: Color(0xFF8AB4F8),
+                      color: AppColors.accent,
                     ),
                   ),
                 ),
@@ -448,7 +445,7 @@ class MarkdownTextWidget extends StatelessWidget {
     final isDark = theme.brightness == Brightness.dark;
     final codeBg = isDark ? const Color(0xFF181818) : const Color(0xFFF0F0F0);
     final borderColor = isDark
-        ? const Color(0xFF2A2A2A)
+        ? AppColors.surface3
         : const Color(0xFFE0E0E0);
     final linkColor = isDark
         ? const Color(0xFF6CB4EE)
@@ -456,13 +453,13 @@ class MarkdownTextWidget extends StatelessWidget {
     final quoteBg = isDark ? const Color(0xFF1A1D23) : const Color(0xFFF5F7FA);
     final quoteBorder = isDark
         ? const Color(0xFF4A6FA5)
-        : const Color(0xFF5A9CF5);
+        : AppColors.accent;
     final inlineCodeBg = isDark
         ? const Color(0xFF252526)
         : const Color(0xFFECECEC);
-    final hrColor = isDark ? const Color(0xFF2A2A2A) : const Color(0xFFE0E0E0);
+    final hrColor = isDark ? AppColors.surface3 : const Color(0xFFE0E0E0);
     final headingColor = isDark
-        ? const Color(0xFFE8E8E8)
+        ? AppColors.textPrimary
         : const Color(0xFF1A1A1A);
     const baseFontSize = 14.0;
 
@@ -665,7 +662,7 @@ class HighlightedCodeBlock extends StatelessWidget {
         borderRadius: BorderRadius.circular(10),
         border: Border.all(
           color: theme.brightness == Brightness.dark
-              ? const Color(0xFF2A2A2A)
+              ? AppColors.surface3
               : const Color(0xFFE0E0E0),
         ),
       ),
@@ -687,7 +684,7 @@ class HighlightedCodeBlock extends StatelessWidget {
           Container(
             height: 1,
             color: theme.brightness == Brightness.dark
-                ? const Color(0xFF2A2A2A)
+                ? AppColors.surface3
                 : const Color(0xFFE0E0E0),
           ),
           Padding(
@@ -763,7 +760,7 @@ class SimpleCodeBlock extends StatelessWidget {
         color: codeBg,
         borderRadius: BorderRadius.circular(10),
         border: Border.all(
-          color: isDark ? const Color(0xFF2A2A2A) : const Color(0xFFE0E0E0),
+          color: isDark ? AppColors.surface3 : const Color(0xFFE0E0E0),
         ),
       ),
       child: Column(
@@ -783,7 +780,7 @@ class SimpleCodeBlock extends StatelessWidget {
           ),
           Container(
             height: 1,
-            color: isDark ? const Color(0xFF2A2A2A) : const Color(0xFFE0E0E0),
+            color: isDark ? AppColors.surface3 : const Color(0xFFE0E0E0),
           ),
           Padding(
             padding: const EdgeInsets.all(12),
@@ -814,7 +811,7 @@ class SystemBubble extends StatelessWidget {
         margin: const EdgeInsets.symmetric(vertical: 12, horizontal: 32),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
         decoration: BoxDecoration(
-          color: const Color(0xFF1C1C1C).withOpacity(0.8),
+          color: AppColors.surface2.withOpacity(0.8),
           borderRadius: BorderRadius.circular(14),
         ),
         child: Text(
@@ -822,7 +819,7 @@ class SystemBubble extends StatelessWidget {
           textAlign: TextAlign.center,
           style: const TextStyle(
             fontSize: 13,
-            color: Color(0xFF808080),
+            color: AppColors.textSecondary,
             fontWeight: FontWeight.w400,
           ),
         ),
@@ -832,12 +829,14 @@ class SystemBubble extends StatelessWidget {
 }
 
 class DateDivider extends StatelessWidget {
-  final DateTime date;
+  const DateDivider({super.key, required this.date});
 
-  const DateDivider({required this.date});
+  final DateTime date;
 
   @override
   Widget build(BuildContext context) {
+    final loc = AppLocalizations.of(context);
+    final localeName = Localizations.localeOf(context).toLanguageTag();
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
     final dateDay = DateTime(date.year, date.month, date.day);
@@ -845,30 +844,26 @@ class DateDivider extends StatelessWidget {
 
     String label;
     if (dateDay == today) {
-      label = 'Сегодня';
+      label = loc.translate('today');
     } else if (dateDay == yesterday) {
-      label = 'Вчера';
+      label = loc.translate('yesterday');
     } else {
-      label = DateFormat('d MMMM', 'ru').format(date);
+      label = DateFormat.MMMd(localeName).format(date);
     }
 
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 12),
+      padding: const EdgeInsets.symmetric(vertical: AppSpacing.s3),
       child: Center(
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.s3,
+            vertical: AppSpacing.s1,
+          ),
           decoration: BoxDecoration(
-            color: const Color(0xFF1C1C1C).withOpacity(0.85),
-            borderRadius: BorderRadius.circular(14),
+            color: AppColors.surface2.withValues(alpha: 0.85),
+            borderRadius: AppRadius.brm,
           ),
-          child: Text(
-            label,
-            style: const TextStyle(
-              fontSize: 13,
-              color: Color(0xFFB0B0B0),
-              fontWeight: FontWeight.w500,
-            ),
-          ),
+          child: Text(label, style: AppText.meta),
         ),
       ),
     );
@@ -948,11 +943,11 @@ class FileAttachment extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final textColor = const Color(0xFFE8E8E8);
-    final sizeColor = const Color(0xFF808080);
-    final iconBgColor = const Color(0xFF2A2A2A);
-    final fileIconColor = const Color(0xFF8AB4F8);
-    final containerBg = const Color(0xFF222222);
+    final textColor = AppColors.textPrimary;
+    final sizeColor = AppColors.textSecondary;
+    final iconBgColor = AppColors.surface3;
+    final fileIconColor = AppColors.accent;
+    final containerBg = AppColors.surface2;
 
     final isIncoming = !fromMe;
     final hasLocal = filePath != null && filePath!.isNotEmpty;
@@ -979,13 +974,16 @@ class FileAttachment extends StatelessWidget {
 
     Future<void> openFile() async {
       if (!hasLocal) return;
+      final loc = AppLocalizations.of(context);
       try {
         final result = await OpenFilex.open(filePath!);
         if (result.type != ResultType.done && context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Не удалось открыть файл: ${result.message}'),
-            ),
+          showAppSnack(
+            context,
+            message: loc
+                .translate('file_open_failed')
+                .replaceAll('%s', result.message),
+            kind: AppSnackKind.error,
           );
         }
       } on MissingPluginException {
@@ -993,14 +991,19 @@ class FileAttachment extends StatelessWidget {
         if (await canLaunchUrl(uri)) {
           await launchUrl(uri, mode: LaunchMode.externalApplication);
         } else if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Нет приложения для открытия файла')),
+          showAppSnack(
+            context,
+            message: loc.translate('file_open_no_app'),
+            kind: AppSnackKind.error,
           );
         }
       } catch (e) {
         if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Не удалось открыть файл: $e')),
+          showAppSnack(
+            context,
+            message:
+                loc.translate('file_open_failed').replaceAll('%s', '$e'),
+            kind: AppSnackKind.error,
           );
         }
       }
@@ -1015,7 +1018,7 @@ class FileAttachment extends StatelessWidget {
         decoration: BoxDecoration(
           color: containerBg,
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: const Color(0xFF333333), width: 1),
+          border: Border.all(color: AppColors.divider, width: 1),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -1049,7 +1052,8 @@ class FileAttachment extends StatelessWidget {
                   if (awaitingSender) ...[
                     const SizedBox(height: 2),
                     Text(
-                      'Ожидает отправителя',
+                      AppLocalizations.of(context)
+                          .translate('file_waiting_sender'),
                       style: TextStyle(fontSize: 11, color: sizeColor),
                     ),
                   ] else if (fileSize != null) ...[
@@ -1067,7 +1071,7 @@ class FileAttachment extends StatelessWidget {
               const Icon(
                 Icons.hourglass_empty,
                 size: 18,
-                color: Color(0xFF8AB4F8),
+                color: AppColors.accent,
               )
             else if (needsDownload)
               IconButton(
@@ -1225,16 +1229,16 @@ class _PinnedBarState extends State<PinnedBar> {
 
     final displayIndex = _selectDisplayIndex(pins);
     final pm = pins[displayIndex];
-    final textColor = const Color(0xFF808080);
-    final lineColor = const Color(0xFF5A9CF5);
+    final textColor = AppColors.textSecondary;
+    final lineColor = AppColors.accent;
 
     return GestureDetector(
       onTap: () => _advanceToNext(pins),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
-          color: const Color(0xFF111111),
-          border: Border(bottom: BorderSide(color: const Color(0xFF333333))),
+          color: AppColors.surface1,
+          border: Border(bottom: BorderSide(color: AppColors.divider)),
         ),
         child: Row(
           children: [
@@ -1257,7 +1261,7 @@ class _PinnedBarState extends State<PinnedBar> {
                       Icon(Icons.push_pin, size: 12, color: textColor),
                       const SizedBox(width: 4),
                       Text(
-                        'Закреплённое',
+                        AppLocalizations.of(context).translate('pinned_label'),
                         style: TextStyle(
                           fontSize: 12,
                           color: textColor,
@@ -1277,7 +1281,7 @@ class _PinnedBarState extends State<PinnedBar> {
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       fontSize: 14,
-                      color: const Color(0xFFB0B0B0),
+                      color: AppColors.textSecondary,
                     ),
                   ),
                 ],
