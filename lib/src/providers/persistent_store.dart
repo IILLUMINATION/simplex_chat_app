@@ -286,18 +286,21 @@ String _previewFromChatItem(Map<String, dynamic> item) {
     final msgType = msgContent?['type'] as String?;
     final text = msgContent?['text'] as String?;
     if (text != null && text.trim().isNotEmpty) return text.trim();
-    if (msgType == 'image') return 'Фото';
-    if (msgType == 'video') return 'Видео';
-    if (msgType == 'voice') return 'Голосовое';
-    if (msgType == 'sticker') return 'Стикер';
+    // TODO(i18n): these placeholders for last-message preview are not
+    // localised yet because the parser has no BuildContext. A follow-up
+    // refactor should return a typed enum and translate in the UI layer.
+    if (msgType == 'image') return '📷';
+    if (msgType == 'video') return '🎬';
+    if (msgType == 'voice') return '🎤';
+    if (msgType == 'sticker') return '🖼️';
     if (msgType == 'file') {
       final file = item['file'] as Map<String, dynamic>?;
       final name = file?['fileName'] as String?;
-      return name?.isNotEmpty == true ? name! : 'Файл';
+      return name?.isNotEmpty == true ? name! : '📎';
     }
-    if (msgType == 'link') return 'Ссылка';
-    if (msgType == 'report') return 'Отчет';
-    if (msgType == 'chat') return 'Чат';
+    if (msgType == 'link') return '🔗';
+    if (msgType == 'report') return '⚠️';
+    if (msgType == 'chat') return '💬';
   }
   final meta = item['meta'] as Map<String, dynamic>?;
   final itemText = meta?['itemText'] as String?;

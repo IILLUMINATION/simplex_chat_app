@@ -635,8 +635,15 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                       packId: pack.id,
                     );
                     if (path != null && mounted) {
+                      final loc = AppLocalizations.of(context);
                       ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('Exported to $path')),
+                        SnackBar(
+                          content: Text(
+                            loc
+                                .translate('sticker_pack_exported_to')
+                                .replaceAll('%s', path),
+                          ),
+                        ),
                       );
                     }
                   }

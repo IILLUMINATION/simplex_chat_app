@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../../localization/app_localizations.dart';
 import '../../../../stickers/sticker_store.dart' show StickerPack, StickerItem;
 import '../media/media_widgets.dart';
 
@@ -12,6 +13,7 @@ class StickerPickerSheet extends StatefulWidget {
   final void Function(StickerPack pack, StickerItem item) onSend;
 
   const StickerPickerSheet({
+    super.key,
     required this.packs,
     required this.onImport,
     required this.onCreate,
@@ -29,6 +31,7 @@ class _StickerPickerSheetState extends State<StickerPickerSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final loc = AppLocalizations.of(context);
     final packs = widget.packs;
     final theme = Theme.of(context);
     return SafeArea(
@@ -42,7 +45,7 @@ class _StickerPickerSheetState extends State<StickerPickerSheet> {
                 child: Column(
                   children: [
                     Text(
-                      'Стикеры не установлены',
+                      loc.translate('sticker_not_installed'),
                       style: theme.textTheme.titleMedium,
                     ),
                     const SizedBox(height: 8),
@@ -52,13 +55,13 @@ class _StickerPickerSheetState extends State<StickerPickerSheet> {
                         ElevatedButton.icon(
                           onPressed: widget.onImport,
                           icon: const Icon(Icons.upload_file),
-                          label: const Text('Импорт'),
+                          label: Text(loc.translate('import')),
                         ),
                         const SizedBox(width: 12),
                         OutlinedButton.icon(
                           onPressed: widget.onCreate,
                           icon: const Icon(Icons.add),
-                          label: const Text('Создать'),
+                          label: Text(loc.translate('create')),
                         ),
                       ],
                     ),
