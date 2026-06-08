@@ -5,7 +5,7 @@ import 'dart:typed_data';
 import 'package:intl/intl.dart';
 import 'package:image/image.dart' as img;
 
-import '../models/chat_message_models.dart';
+import '../domain/chat_models.dart';
 
 UiMessage? parseChatItem(Map<String, dynamic> msg, {String? filesBaseDir}) {
   final chatDir = msg['chatDir'] as Map<String, dynamic>?;

@@ -20,7 +20,7 @@ import 'package:open_filex/open_filex.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../../data/pin_store.dart' show PinnedMessage;
-import '../../models/chat_message_models.dart';
+import '../../../../domain/chat_models.dart';
 import '../audio/audio_widgets.dart';
 import '../media/media_widgets.dart';
 

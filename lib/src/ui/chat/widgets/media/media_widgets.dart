@@ -6,8 +6,8 @@ import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 import 'package:video_thumbnail/video_thumbnail.dart' as vthumb;
 
-import '../../models/chat_message_models.dart';
-import '../../utils/chat_message_parser.dart';
+import '../../../../domain/chat_models.dart';
+import '../../../../data/chat_message_parser.dart';
 
 class MediaGrid extends StatelessWidget {
   final List<UiImage> images;

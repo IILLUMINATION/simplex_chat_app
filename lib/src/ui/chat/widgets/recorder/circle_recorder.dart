@@ -5,8 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:video_thumbnail/video_thumbnail.dart' as vthumb;
 
 import '../../../../localization/app_localizations.dart';
-import '../../models/chat_message_models.dart';
-import '../../utils/chat_message_parser.dart';
+import '../../../../domain/chat_models.dart';
+import '../../../../data/chat_message_parser.dart';
 
 class CircleRecorderScreen extends StatefulWidget {
   const CircleRecorderScreen({super.key});

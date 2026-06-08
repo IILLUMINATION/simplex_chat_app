@@ -1,5 +1,5 @@
-export 'models/chat_message_models.dart';
-export 'utils/chat_message_parser.dart';
+export '../../domain/chat_models.dart';
+export '../../data/chat_message_parser.dart';
 
 export 'widgets/message/message_widgets.dart';
 export 'widgets/audio/audio_widgets.dart';

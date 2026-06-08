@@ -17,13 +17,13 @@ import '../../../main.dart';
 import '../../data/pin_store.dart';
 import '../../localization/app_localizations.dart';
 import '../../service/tanglex_service.dart' show ImagePayload, SendMessageResult;
-import 'utils/chat_message_parser.dart'
+import '../../data/chat_message_parser.dart'
     show prepareStickerPreview, compressPreview;
 import '../../stickers/sticker_store.dart'
     show StickerStore, StickerPack, StickerItem;
 import 'chat_widgets.dart';
 import 'package:just_audio/just_audio.dart';
-import 'audio_player_holder.dart';
+import '../../data/audio_player_holder.dart';
 
 /// Функция для парсинга сообщений в isolate (не блокирует UI)
 List<UiMessage> _parseMessagesIsolate(Map<String, dynamic> params) {

@@ -7,7 +7,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:video_player/video_player.dart';
 
-import '../../models/chat_message_models.dart';
+import '../../../../domain/chat_models.dart';
 import 'media_widgets.dart' show thumbCache, generateVideoThumb;
 
 class GalleryView extends StatefulWidget {
