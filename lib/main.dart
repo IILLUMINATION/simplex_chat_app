@@ -4,8 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'src/localization/app_localizations.dart';
 import 'src/providers/locale_provider.dart';
-import 'src/providers/theme_provider.dart';
 import 'src/service/tanglex_service.dart';
+import 'src/ui/design/theme.dart';
 import 'src/ui/home_screen.dart';
 
 // Global provider so all screens share the same TanglexService
@@ -48,17 +48,16 @@ class TangleXApp extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final themeConfig = ref.watch(themeNotifierProvider);
     final localeConfig = ref.watch(localeNotifierProvider);
-    final notifier = ref.watch(themeNotifierProvider.notifier);
     final locale = AppLocale.fromCode(localeConfig.locale);
+    final theme = buildAppTheme();
 
     return MaterialApp(
       title: 'TangleX Chat',
       debugShowCheckedModeBanner: false,
-      themeMode: AppThemeMode.fromName(themeConfig.mode).flutterMode,
-      theme: notifier.lightTheme,
-      darkTheme: notifier.darkTheme,
+      themeMode: ThemeMode.dark,
+      theme: theme,
+      darkTheme: theme,
       locale: locale.flutterLocale,
       supportedLocales: const [
         Locale('en'),
