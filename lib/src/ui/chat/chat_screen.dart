@@ -17,6 +17,7 @@ import '../../../main.dart';
 import '../../data/pin_store.dart';
 import '../../localization/app_localizations.dart';
 import '../../service/tanglex_service.dart' show ImagePayload, SendMessageResult;
+import '../design/design.dart';
 import 'utils/chat_message_parser.dart'
     show prepareStickerPreview, compressPreview;
 import '../../stickers/sticker_store.dart'
@@ -46,43 +47,20 @@ List<UiMessage> _parseMessagesIsolate(Map<String, dynamic> params) {
 String? _globalFilesDirCache;
 
 class _ChatHeader extends StatelessWidget {
-  final String title;
-  final String chatType;
-  final Uint8List? avatarImage;
-  final Color textPrimary;
-  final Color textSecondary;
-
   const _ChatHeader({
     required this.title,
     required this.chatType,
     required this.avatarImage,
-    required this.textPrimary,
-    required this.textSecondary,
   });
 
+  final String title;
+  final String chatType;
+  final Uint8List? avatarImage;
+
   String _subtitle(AppLocalizations loc) {
-    // FIX: ранее были хардкодные русские строки. Английский пользователь
-    // видел "Группа" / "Контакт" / "Чат" вместо локализованной строки.
     if (chatType == 'group') return loc.translate('chat_type_group');
     if (chatType == 'contact') return loc.translate('chat_type_contact');
     return loc.translate('chat_type_chat');
-  }
-
-  String _initials() {
-    final parts = title.trim().split(RegExp(r'\s+'));
-    if (parts.isEmpty) return '';
-    if (parts.length == 1) {
-      final runes = parts.first.runes.toList();
-      final take = runes.take(2).toList();
-      return String.fromCharCodes(take).toUpperCase();
-    }
-    final a = parts[0].runes.isEmpty
-        ? ''
-        : String.fromCharCodes([parts[0].runes.first]);
-    final b = parts[1].runes.isEmpty
-        ? ''
-        : String.fromCharCodes([parts[1].runes.first]);
-    return (a + b).toUpperCase();
   }
 
   @override
@@ -90,25 +68,13 @@ class _ChatHeader extends StatelessWidget {
     final loc = AppLocalizations.of(context);
     return Row(
       children: [
-        const SizedBox(width: 4),
-        CircleAvatar(
-          radius: 18,
-          backgroundColor: const Color(0xFF2A2A2A),
-          backgroundImage: avatarImage != null
-              ? MemoryImage(avatarImage!)
-              : null,
-          child: avatarImage == null
-              ? Text(
-                  _initials(),
-                  style: TextStyle(
-                    color: textPrimary,
-                    fontWeight: FontWeight.w600,
-                    fontSize: 12,
-                  ),
-                )
-              : null,
+        AppAvatar(
+          name: title,
+          imageBytes: avatarImage,
+          isGroup: chatType == 'group',
+          size: AppAvatarSize.medium,
         ),
-        const SizedBox(width: 10),
+        const SizedBox(width: AppSpacing.s3),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -116,18 +82,13 @@ class _ChatHeader extends StatelessWidget {
             children: [
               Text(
                 title,
-                style: TextStyle(
-                  color: textPrimary,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: -0.2,
-                ),
+                style: AppText.titleSmall,
                 overflow: TextOverflow.ellipsis,
               ),
-              const SizedBox(height: 2),
+              const SizedBox(height: 1),
               Text(
                 _subtitle(loc),
-                style: TextStyle(color: textSecondary, fontSize: 12),
+                style: AppText.meta,
                 overflow: TextOverflow.ellipsis,
               ),
             ],
@@ -418,7 +379,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(_labelForSendFailure(loc, sendResult)),
-          backgroundColor: const Color(0xFFCF6679),
+          backgroundColor: AppColors.error,
         ),
       );
     }
@@ -1269,8 +1230,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         Size(screenW, screenH),
       ),
       color: Theme.of(ctx).brightness == Brightness.dark
-          ? const Color(0xFF1E232A)
-          : const Color(0xFFFFFFFF),
+          ? AppColors.surface2
+          : AppColors.textOnAccent,
       elevation: 8,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       items: items,
@@ -1381,14 +1342,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final theme = Theme.of(context);
     final displayEntries = _displayEntries;
 
-    final chatBackground = const Color(0xFF000000);
-    final headerBg = const Color(0xFF111111);
-    final inputBg = const Color(0xFF111111);
-    final textPrimary = const Color(0xFFE8E8E8);
-    final textSecondary = const Color(0xFF808080);
-
     return Scaffold(
-      backgroundColor: chatBackground,
+      backgroundColor: AppColors.bg,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         surfaceTintColor: Colors.transparent,
@@ -1396,12 +1351,14 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         elevation: 0,
         flexibleSpace: ClipRect(
           child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-            child: Container(color: headerBg.withOpacity(0.85)),
+            filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+            child: Container(
+              color: AppColors.surface1.withValues(alpha: 0.78),
+            ),
           ),
         ),
         leading: IconButton(
-          icon: Icon(Icons.arrow_back, color: textPrimary),
+          icon: const Icon(Icons.arrow_back_rounded),
           onPressed: () => Navigator.of(context).pop(),
         ),
         titleSpacing: 0,
@@ -1409,8 +1366,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           title: widget.chatName,
           chatType: widget.chatType,
           avatarImage: widget.avatarImage,
-          textPrimary: textPrimary,
-          textSecondary: textSecondary,
         ),
       ),
       body: SelectionArea(
@@ -1429,7 +1384,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                   ? Center(
                       child: Text(
                         loc.translate('no_messages_yet'),
-                        style: TextStyle(color: textSecondary),
+                        style: TextStyle(color: AppColors.textSecondary),
                       ),
                     )
                   : Column(
@@ -1506,7 +1461,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                                         child: const Icon(
                                           Icons.arrow_downward,
                                           size: 20,
-                                          color: Color(0xFF808080),
+                                          color: AppColors.textSecondary,
                                         ),
                                       ),
                                     ),
@@ -1522,9 +1477,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               child: Container(
                 padding: const EdgeInsets.fromLTRB(8, 6, 8, 8),
                 decoration: BoxDecoration(
-                  color: inputBg,
+                  color: AppColors.surface1,
                   border: const Border(
-                    top: BorderSide(color: Color(0xFF333333)),
+                    top: BorderSide(color: AppColors.divider),
                   ),
                 ),
                 child: Column(
@@ -1532,7 +1487,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                   children: [
                     if (widget.chatType == 'contact' && !_messagingReady)
                       Material(
-                        color: const Color(0xFF152535),
+                        color: AppColors.accentMuted,
                         child: Padding(
                           padding: const EdgeInsets.symmetric(
                             horizontal: 12,
@@ -1545,7 +1500,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                                 padding: EdgeInsets.only(top: 1),
                                 child: Icon(
                                   Icons.hourglass_top_rounded,
-                                  color: Color(0xFF5A9CF5),
+                                  color: AppColors.accent,
                                   size: 22,
                                 ),
                               ),
@@ -1554,7 +1509,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                                 child: Text(
                                   loc.translate('chat_wait_send'),
                                   style: const TextStyle(
-                                    color: Color(0xFFB8C5D9),
+                                    color: AppColors.textPrimary,
                                     fontSize: 13.5,
                                     height: 1.35,
                                   ),
@@ -1571,10 +1526,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                           child: Container(
                             margin: const EdgeInsets.only(bottom: 6),
                             decoration: BoxDecoration(
-                              color: const Color(0xFF303030),
+                              color: AppColors.surface3,
                               borderRadius: BorderRadius.circular(12),
                               border: Border.all(
-                                color: const Color(0xFF3A3A3A),
+                                color: AppColors.border,
                                 width: 1,
                               ),
                             ),
@@ -1589,7 +1544,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                                     right: 8,
                                   ),
                                   decoration: BoxDecoration(
-                                    color: const Color(0xFF5A9CF5),
+                                    color: AppColors.accent,
                                     borderRadius: BorderRadius.circular(2),
                                   ),
                                 ),
@@ -1614,7 +1569,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                                           style: const TextStyle(
                                             fontSize: 12,
                                             fontWeight: FontWeight.w600,
-                                            color: Color(0xFF5A9CF5),
+                                            color: AppColors.accent,
                                           ),
                                         ),
                                         const SizedBox(height: 2),
@@ -1623,7 +1578,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                                           maxLines: 1,
                                           overflow: TextOverflow.ellipsis,
                                           style: TextStyle(
-                                            color: textPrimary,
+                                            color: AppColors.textPrimary,
                                             fontSize: 13,
                                           ),
                                         ),
@@ -1637,7 +1592,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                                   icon: Icon(
                                     Icons.close,
                                     size: 16,
-                                    color: textSecondary,
+                                    color: AppColors.textSecondary,
                                   ),
                                   padding: const EdgeInsets.all(4),
                                   constraints: const BoxConstraints(),
@@ -1654,7 +1609,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                           onPressed: (_sendingMedia || !_canCompose)
                               ? null
                               : _openAttachMenu,
-                          icon: Icon(Icons.attach_file, color: textSecondary),
+                          icon: Icon(Icons.attach_file, color: AppColors.textSecondary),
                         ),
                         Expanded(
                           child: ConstrainedBox(
@@ -1662,7 +1617,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                             child: TextField(
                               controller: _msgController,
                               readOnly: !_canCompose,
-                              style: TextStyle(color: textPrimary),
+                              style: TextStyle(color: AppColors.textPrimary),
                               decoration: InputDecoration(
                                 hintText: _canCompose
                                     ? loc.translate('message_hint')
@@ -1670,7 +1625,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                                         'message_hint_wait_connection',
                                       ),
                                 hintStyle: const TextStyle(
-                                  color: Color(0xFF606060),
+                                  color: AppColors.textSecondary,
                                 ),
                                 filled: false,
                                 border: OutlineInputBorder(
@@ -1718,7 +1673,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                                   : _openStickerPicker,
                               icon: Icon(
                                 Icons.emoji_emotions_outlined,
-                                color: textSecondary,
+                                color: AppColors.textSecondary,
                               ),
                             );
                           },
@@ -1748,7 +1703,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                                     _circleMode
                                         ? Icons.radio_button_checked
                                         : Icons.mic_none,
-                                    color: textSecondary,
+                                    color: AppColors.textSecondary,
                                     size: 24,
                                   ),
                                 ),
