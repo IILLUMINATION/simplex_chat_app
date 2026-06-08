@@ -1,14 +1,18 @@
+// Developer console: free-form FFI command input + scrolling logs.
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../main.dart';
 import '../localization/app_localizations.dart';
+import 'design/design.dart';
 
 class DebugScreenWrapper extends ConsumerStatefulWidget {
   const DebugScreenWrapper({super.key});
 
   @override
-  ConsumerState<DebugScreenWrapper> createState() => _DebugScreenWrapperState();
+  ConsumerState<DebugScreenWrapper> createState() =>
+      _DebugScreenWrapperState();
 }
 
 class _DebugScreenWrapperState extends ConsumerState<DebugScreenWrapper> {
@@ -21,6 +25,12 @@ class _DebugScreenWrapperState extends ConsumerState<DebugScreenWrapper> {
     _autoInitCore();
   }
 
+  @override
+  void dispose() {
+    _cmdController.dispose();
+    super.dispose();
+  }
+
   Future<void> _autoInitCore() async {
     if (_initializing) return;
     _initializing = true;
@@ -29,8 +39,8 @@ class _DebugScreenWrapperState extends ConsumerState<DebugScreenWrapper> {
       if (!service.isInitialized) {
         await service.initialize();
       }
-    } catch (e) {
-      // Errors are logged by service
+    } catch (_) {
+      // Errors are surfaced through service.logs.
     } finally {
       _initializing = false;
     }
@@ -40,68 +50,24 @@ class _DebugScreenWrapperState extends ConsumerState<DebugScreenWrapper> {
     final cmd = _cmdController.text.trim();
     if (cmd.isEmpty) return;
     _cmdController.clear();
-
-    final service = ref.read(tanglexServiceProvider);
-    await service.sendCommand(cmd);
-  }
-
-  @override
-  void dispose() {
-    _cmdController.dispose();
-    super.dispose();
+    await ref.read(tanglexServiceProvider).sendCommand(cmd);
   }
 
   @override
   Widget build(BuildContext context) {
     final loc = AppLocalizations.of(context);
     final service = ref.watch(tanglexServiceProvider);
-    final cs = Theme.of(context).colorScheme;
     final isReady = service.isInitialized;
 
     return Scaffold(
-      appBar: AppBar(
-        title: Text(loc.translate('debug_console')),
-      ),
+      appBar: AppBar(title: Text(loc.translate('debug_console'))),
       body: Padding(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(AppSpacing.s3),
         child: Column(
           children: [
-            // Status indicator
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: isReady
-                    ? cs.primaryContainer.withOpacity(0.3)
-                    : cs.tertiaryContainer.withOpacity(0.3),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                  color: isReady ? cs.primaryContainer : cs.tertiaryContainer,
-                ),
-              ),
-              child: Row(
-                children: [
-                  Icon(
-                    isReady ? Icons.check_circle : Icons.hourglass_top,
-                    size: 20,
-                    color: isReady ? cs.onPrimaryContainer : cs.onTertiaryContainer,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    isReady
-                        ? loc.translate('core_initialized')
-                        : loc.translate('initializing'),
-                    style: TextStyle(
-                      color: isReady ? cs.onPrimaryContainer : cs.onTertiaryContainer,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 12),
+            _StatusChip(isReady: isReady, loc: loc),
+            const SizedBox(height: AppSpacing.s3),
 
-            // Command input
             Row(
               children: [
                 Expanded(
@@ -110,48 +76,46 @@ class _DebugScreenWrapperState extends ConsumerState<DebugScreenWrapper> {
                     decoration: InputDecoration(
                       labelText: loc.translate('command_label'),
                       hintText: loc.translate('command_hint'),
-                      border: const OutlineInputBorder(),
                       isDense: true,
                     ),
                     onSubmitted: (_) => _sendCommand(),
                   ),
                 ),
-                const SizedBox(width: 8),
-                FilledButton.icon(
+                const SizedBox(width: AppSpacing.s2),
+                AppPrimaryButton(
+                  label: loc.translate('send'),
+                  icon: Icons.send_rounded,
                   onPressed: _sendCommand,
-                  icon: const Icon(Icons.send),
-                  label: Text(loc.translate('send')),
                 ),
               ],
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: AppSpacing.s3),
 
-            // Logs
             Expanded(
               child: DecoratedBox(
                 decoration: BoxDecoration(
-                  border: Border.all(color: cs.outlineVariant),
-                  borderRadius: BorderRadius.circular(10),
+                  color: AppColors.surface2,
+                  border: Border.all(color: AppColors.border),
+                  borderRadius: AppRadius.brm,
                 ),
                 child: ValueListenableBuilder<List<String>>(
                   valueListenable: service.logs,
                   builder: (context, logs, _) {
                     if (logs.isEmpty) {
-                      return Center(child: Text(loc.translate('logs_here')));
+                      return Center(
+                        child: Text(
+                          loc.translate('logs_here'),
+                          style: AppText.caption,
+                        ),
+                      );
                     }
-
                     return ListView.builder(
-                      padding: const EdgeInsets.all(10),
+                      padding: const EdgeInsets.all(AppSpacing.s3),
                       itemCount: logs.length,
-                      itemBuilder: (context, i) {
-                        return SelectableText(
-                          logs[i],
-                          style: const TextStyle(
-                            fontFamily: 'monospace',
-                            fontSize: 12,
-                          ),
-                        );
-                      },
+                      itemBuilder: (context, i) => SelectableText(
+                        logs[i],
+                        style: AppText.code.copyWith(fontSize: 12),
+                      ),
                     );
                   },
                 ),
@@ -159,6 +123,44 @@ class _DebugScreenWrapperState extends ConsumerState<DebugScreenWrapper> {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _StatusChip extends StatelessWidget {
+  const _StatusChip({required this.isReady, required this.loc});
+
+  final bool isReady;
+  final AppLocalizations loc;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = isReady ? AppColors.success : AppColors.warning;
+    final icon = isReady
+        ? Icons.check_circle_rounded
+        : Icons.hourglass_top_rounded;
+    final label = isReady
+        ? loc.translate('core_initialized')
+        : loc.translate('initializing');
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(AppSpacing.s2),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.15),
+        borderRadius: AppRadius.brs,
+        border: Border.all(color: color.withValues(alpha: 0.5)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, size: AppIconSize.small, color: color),
+          const SizedBox(width: AppSpacing.s2),
+          Text(
+            label,
+            style: AppText.captionEmph.copyWith(color: color),
+          ),
+        ],
       ),
     );
   }

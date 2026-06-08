@@ -1,3 +1,6 @@
+// Profile screen: shows the active user profile, list of other profiles
+// (one-tap switch), and exposes "create new" / "delete" actions.
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -6,6 +9,7 @@ import '../../main.dart';
 import '../localization/app_localizations.dart';
 import '../providers/persistent_store.dart';
 import 'create_profile_screen.dart';
+import 'design/design.dart';
 
 class ProfileScreen extends ConsumerStatefulWidget {
   const ProfileScreen({super.key});
@@ -37,32 +41,22 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     });
   }
 
-  void _showSnackBar(String message, bool success) {
-    if (!mounted) return;
-    final cs = Theme.of(context).colorScheme;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: success ? cs.onInverseSurface : cs.error,
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final loc = AppLocalizations.of(context);
     final profileAsync = ref.watch(persistedProfileProvider);
 
     return Scaffold(
-      backgroundColor: const Color(0xFF000000),
+      appBar: AppBar(title: Text(loc.translate('profile_default_name'))),
       body: profileAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (_, __) => _buildNoProfile(loc),
+        loading: () => const Center(
+          child: CircularProgressIndicator(color: AppColors.accent),
+        ),
+        error: (_, _) => _buildNoProfile(loc),
         data: (profile) {
           if (profile == null && _userData == null) {
             return _buildNoProfile(loc);
           }
-
           return _buildProfileDisplay(profile, loc);
         },
       ),
@@ -70,52 +64,24 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   }
 
   Widget _buildNoProfile(AppLocalizations loc) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.person_outline, size: 80,
-                color: Theme.of(context).colorScheme.outline),
-            const SizedBox(height: 16),
-            Text(
-              loc.translate('no_profile_yet'),
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                    color: Theme.of(context).colorScheme.outline,
-                  ),
+    final service = ref.watch(tanglexServiceProvider);
+    return AppEmptyState(
+      icon: Icons.person_outline_rounded,
+      title: loc.translate('no_profile_yet'),
+      hint: loc.translate('create_profile_description'),
+      action: AppPrimaryButton(
+        label: loc.translate('create_profile'),
+        icon: Icons.person_add_rounded,
+        onPressed: () async {
+          await Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => CreateProfileScreen(service: service),
             ),
-            const SizedBox(height: 8),
-            Text(
-              loc.translate('create_profile_description'),
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: Theme.of(context).colorScheme.outline,
-                  ),
-            ),
-            const SizedBox(height: 24),
-            Consumer(
-              builder: (context, ref, _) {
-                final service = ref.watch(tanglexServiceProvider);
-                return FilledButton.icon(
-                  onPressed: () async {
-                    await Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => CreateProfileScreen(service: service),
-                      ),
-                    );
-                    await _loadUserData();
-                    if (mounted) {
-                      ref.invalidate(persistedProfileProvider);
-                    }
-                  },
-                  icon: const Icon(Icons.person_add),
-                  label: Text(loc.translate('create_profile')),
-                );
-              },
-            ),
-          ],
-        ),
+          );
+          await _loadUserData();
+          if (mounted) ref.invalidate(persistedProfileProvider);
+        },
       ),
     );
   }
@@ -123,7 +89,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   Widget _buildProfileDisplay(ProfileData? profile, AppLocalizations loc) {
     final displayName = profile?.displayName ??
         _userData?['localDisplayName'] as String? ??
-        'Unknown';
+        loc.translate('profile_default_name');
     final fullName = profile?.fullName ??
         _userData?['profile']?['fullName'] as String? ??
         '';
@@ -134,67 +100,54 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
 
     return RefreshIndicator(
       onRefresh: _loadUserData,
+      color: AppColors.accent,
       child: ListView(
         children: [
-          Container(
-            padding: const EdgeInsets.all(24),
+          // ===== Header =====
+          Padding(
+            padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.s4,
+              vertical: AppSpacing.s6,
+            ),
             child: Column(
               children: [
-                CircleAvatar(
-                  radius: 48,
-                  backgroundColor: Theme.of(context).colorScheme.primaryContainer,
-                  child: Icon(
-                    Icons.person,
-                    size: 48,
-                    color: Theme.of(context).colorScheme.onPrimaryContainer,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  displayName,
-                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
-                ),
+                AppAvatar(name: displayName, size: AppAvatarSize.xlarge),
+                const SizedBox(height: AppSpacing.s4),
+                Text(displayName, style: AppText.display),
                 if (fullName.isNotEmpty) ...[
-                  const SizedBox(height: 4),
-                  Text(
-                    fullName,
-                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                          color: Theme.of(context).colorScheme.outline,
-                        ),
-                  ),
+                  const SizedBox(height: AppSpacing.s1),
+                  Text(fullName, style: AppText.caption),
                 ],
                 if (shortDescr.isNotEmpty) ...[
-                  const SizedBox(height: 8),
+                  const SizedBox(height: AppSpacing.s3),
                   Container(
                     padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 6,
+                      horizontal: AppSpacing.s3,
+                      vertical: AppSpacing.s2,
                     ),
                     decoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                      borderRadius: BorderRadius.circular(16),
+                      color: AppColors.surface2,
+                      borderRadius: AppRadius.brm,
                     ),
-                    child: Text(shortDescr),
+                    child: Text(shortDescr, style: AppText.body),
                   ),
                 ],
               ],
             ),
           ),
-          const Divider(),
+          const AppDivider(),
 
           if (userId != null)
             ListTile(
-              leading: const Icon(Icons.fingerprint),
+              leading: const Icon(Icons.fingerprint_rounded),
               title: Text(loc.translate('user_id')),
-              subtitle: Text('$userId'),
+              subtitle: Text('$userId', style: AppText.caption),
             ),
 
-          const Divider(),
+          const AppDivider(),
 
           ListTile(
-            leading: const Icon(Icons.person_add),
+            leading: const Icon(Icons.person_add_rounded),
             title: Text(loc.translate('create_new_profile')),
             subtitle: Text(loc.translate('create_new_profile_hint')),
             onTap: () async {
@@ -207,48 +160,71 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 ),
               );
               await _loadUserData();
-              if (mounted) {
-                ref.invalidate(persistedProfileProvider);
-              }
+              if (mounted) ref.invalidate(persistedProfileProvider);
             },
           ),
           ListTile(
-            leading: const Icon(Icons.refresh),
+            leading: const Icon(Icons.refresh_rounded),
             title: Text(loc.translate('refresh')),
             onTap: _loadUserData,
           ),
           if (userId != null)
             ListTile(
-              leading: const Icon(Icons.delete_outline),
-              title: Text(loc.translate('delete_profile')),
+              leading: const Icon(
+                Icons.delete_outline_rounded,
+                color: AppColors.error,
+              ),
+              title: Text(
+                loc.translate('delete_profile'),
+                style: AppText.body.copyWith(color: AppColors.error),
+              ),
               subtitle: Text(loc.translate('delete_profile_hint')),
               enabled: !_busy,
               onTap: _busy ? null : () => _confirmDelete(userId),
             ),
           if (_users.isNotEmpty) ...[
-            const Divider(),
+            const AppDivider(),
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.s4,
+                AppSpacing.s4,
+                AppSpacing.s4,
+                AppSpacing.s2,
+              ),
               child: Text(
-                loc.translate('profiles'),
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
+                loc.translate('profiles').toUpperCase(),
+                style: AppText.meta.copyWith(
+                  color: AppColors.textSecondary,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 0.6,
+                ),
               ),
             ),
             ..._users.map((entry) {
               final user = entry['user'] as Map<String, dynamic>? ?? {};
               final name = user['localDisplayName'] as String? ??
                   user['profile']?['displayName'] as String? ??
-                  'Unknown';
+                  loc.translate('profile_default_name');
               final id = user['userId'] as int?;
               final isActive = user['activeUser'] == true;
               return ListTile(
-                leading: Icon(isActive ? Icons.check_circle : Icons.circle_outlined),
-                title: Text(name),
-                subtitle: Text(loc.translate('user_id_value').replaceAll('%s', id?.toString() ?? '-')),
+                leading: AppAvatar(
+                  name: name,
+                  size: AppAvatarSize.medium,
+                ),
+                title: Text(name, style: AppText.bodyEmph),
+                subtitle: Text(
+                  loc
+                      .translate('user_id_value')
+                      .replaceAll('%s', id?.toString() ?? '-'),
+                  style: AppText.caption,
+                ),
                 trailing: isActive
-                    ? Text(loc.translate('active'))
+                    ? Text(
+                        loc.translate('active'),
+                        style:
+                            AppText.captionEmph.copyWith(color: AppColors.accent),
+                      )
                     : TextButton(
                         onPressed: (_busy || id == null)
                             ? null
@@ -258,43 +234,32 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
               );
             }),
           ],
+          const SizedBox(height: AppSpacing.s6),
         ],
       ),
     );
   }
 
-  /// SimpleX: нельзя удалить активного пользователя, пока есть другие видимые профили.
-  int? _firstOtherUserId(List<Map<String, dynamic>> userInfos, int skipUserId) {
+  int? _firstOtherUserId(
+      List<Map<String, dynamic>> userInfos, int skipUserId) {
     for (final entry in userInfos) {
       final u = entry['user'] as Map<String, dynamic>?;
       final id = u?['userId'] as int?;
-      if (id != null && id != skipUserId) {
-        return id;
-      }
+      if (id != null && id != skipUserId) return id;
     }
     return null;
   }
 
   Future<void> _confirmDelete(int userId) async {
     final loc = AppLocalizations.of(context);
-    final ok = await showDialog<bool>(
+    final ok = await showAppConfirmDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text(loc.translate('delete_profile_confirm')),
-        content: Text(loc.translate('delete_profile_warning')),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: Text(loc.translate('cancel')),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: Text(loc.translate('delete')),
-          ),
-        ],
-      ),
+      title: loc.translate('delete_profile_confirm'),
+      message: loc.translate('delete_profile_warning'),
+      confirmLabel: loc.translate('delete'),
+      cancelLabel: loc.translate('cancel'),
+      destructive: true,
     );
-
     if (ok != true) return;
 
     setState(() => _busy = true);
@@ -312,33 +277,28 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       }
       if (activeId == userId && users.length > 1) {
         final other = _firstOtherUserId(users, userId);
-        if (kDebugMode) {
-          debugPrint('[Profile] delete retry: switch to userId=$other then delete $userId');
-        }
         if (other != null) {
           final switched = await service.setActiveUser(other);
           if (switched) {
             success = await service.deleteUser(userId);
-          } else if (kDebugMode) {
-            debugPrint('[Profile] setActiveUser($other) failed, delete retry skipped');
           }
         }
       }
     }
     if (success && mounted) {
       await clearProfileData();
-      // Reload user data to reflect deletion — getUser() will return null
-      // or switch to another user if one exists
       _userData = null;
       _users = [];
       await _loadUserData();
     }
-    if (mounted) {
-      _showSnackBar(
-        success ? loc.translate('profile_deleted') : loc.translate('failed_delete_profile'),
-        success,
-      );
-    }
+    if (!mounted) return;
+    showAppSnack(
+      context,
+      message: success
+          ? loc.translate('profile_deleted')
+          : loc.translate('failed_delete_profile'),
+      kind: success ? AppSnackKind.success : AppSnackKind.error,
+    );
     setState(() => _busy = false);
   }
 
@@ -347,17 +307,14 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     setState(() => _busy = true);
     final service = ref.read(tanglexServiceProvider);
     final success = await service.setActiveUser(userId);
-    if (!success && kDebugMode) {
-      debugPrint('[Profile] setActiveUser($userId) returned false');
-    }
     if (success && mounted) {
-      // Update local cache to match the newly active user
       final newUser = await service.getUser();
       if (mounted && newUser != null) {
         _userData = newUser;
         final displayName = newUser['localDisplayName'] as String? ?? '';
         final fullName = newUser['profile']?['fullName'] as String? ?? '';
-        final shortDescr = newUser['profile']?['shortDescr'] as String? ?? '';
+        final shortDescr =
+            newUser['profile']?['shortDescr'] as String? ?? '';
         await saveProfileData(ProfileData(
           displayName: displayName,
           fullName: fullName,
@@ -369,15 +326,16 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         ));
         ref.invalidate(persistedProfileProvider);
       }
-      // Also refresh the users list
       await _loadUserData();
     }
-    if (mounted) {
-      _showSnackBar(
-        success ? loc.translate('profile_updated') : loc.translate('failed_switch_profile'),
-        success,
-      );
-    }
+    if (!mounted) return;
+    showAppSnack(
+      context,
+      message: success
+          ? loc.translate('profile_updated')
+          : loc.translate('failed_switch_profile'),
+      kind: success ? AppSnackKind.success : AppSnackKind.error,
+    );
     setState(() => _busy = false);
   }
 }

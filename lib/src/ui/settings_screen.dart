@@ -1,9 +1,12 @@
+// Settings screen. Currently exposes only the locale selector.
+// Theme is fixed (dark-only) per DESIGN.md.
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../localization/app_localizations.dart';
 import '../providers/locale_provider.dart';
-import '../providers/theme_provider.dart';
+import 'design/design.dart';
 
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
@@ -11,80 +14,19 @@ class SettingsScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final loc = AppLocalizations.of(context);
-    final themeConfig = ref.watch(themeNotifierProvider);
     final localeConfig = ref.watch(localeNotifierProvider);
+    final current = AppLocale.fromCode(localeConfig.locale);
 
     return Scaffold(
-      appBar: AppBar(
-        title: Text(loc.translate('settings')),
-      ),
+      appBar: AppBar(title: Text(loc.translate('settings'))),
       body: ListView(
         children: [
-          // ===== Theme Mode =====
+          const _SectionHeader(),
           ListTile(
-            leading: const Icon(Icons.brightness_auto),
-            title: Text(loc.translate('theme_mode')),
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: SegmentedButton<AppThemeMode>(
-              segments: [
-                ButtonSegment(
-                  value: AppThemeMode.light,
-                  label: Text(loc.translate('light')),
-                  icon: const Icon(Icons.light_mode),
-                ),
-                ButtonSegment(
-                  value: AppThemeMode.system,
-                  label: Text(loc.translate('system')),
-                  icon: const Icon(Icons.settings_brightness),
-                ),
-                ButtonSegment(
-                  value: AppThemeMode.dark,
-                  label: Text(loc.translate('dark')),
-                  icon: const Icon(Icons.dark_mode),
-                ),
-              ],
-              selected: {AppThemeMode.fromName(themeConfig.mode)},
-              onSelectionChanged: (modes) {
-                ref.read(themeNotifierProvider.notifier).setMode(modes.first);
-              },
-            ),
-          ),
-          const Divider(),
-
-          // ===== Theme Style =====
-          ListTile(
-            leading: const Icon(Icons.palette),
-            title: Text(loc.translate('theme_style')),
-          ),
-          ...AppTheme.values.map((theme) {
-            return ListTile(
-              leading: Radio<AppTheme>(
-                // ignore: deprecated_member_use
-                value: theme,
-                // ignore: deprecated_member_use
-                groupValue: AppTheme.fromName(themeConfig.theme),
-                // ignore: deprecated_member_use
-                onChanged: (value) {
-                  ref.read(themeNotifierProvider.notifier).setTheme(value!);
-                },
-              ),
-              title: Text(loc.translate(theme.name)),
-              onTap: () {
-                ref.read(themeNotifierProvider.notifier).setTheme(theme);
-              },
-            );
-          }),
-          const Divider(),
-
-          // ===== Language =====
-          ListTile(
-            leading: const Icon(Icons.language),
+            leading: const Icon(Icons.language_rounded),
             title: Text(loc.translate('language')),
           ),
           ...AppLocale.values.map((appLocale) {
-            final current = AppLocale.fromCode(localeConfig.locale);
             return ListTile(
               leading: Radio<AppLocale>(
                 // ignore: deprecated_member_use
@@ -93,14 +35,16 @@ class SettingsScreen extends ConsumerWidget {
                 groupValue: current,
                 // ignore: deprecated_member_use
                 onChanged: (value) {
-                  ref.read(localeNotifierProvider.notifier).setLocale(value!);
-                  _restartForLocale(ref);
+                  if (value != null) {
+                    ref.read(localeNotifierProvider.notifier).setLocale(value);
+                  }
                 },
               ),
               title: Text(loc.translate(appLocale.name)),
               onTap: () {
-                ref.read(localeNotifierProvider.notifier).setLocale(appLocale);
-                _restartForLocale(ref);
+                ref
+                    .read(localeNotifierProvider.notifier)
+                    .setLocale(appLocale);
               },
             );
           }),
@@ -108,9 +52,28 @@ class SettingsScreen extends ConsumerWidget {
       ),
     );
   }
+}
 
-  void _restartForLocale(WidgetRef ref) {
-    // Just save — user should restart app manually or we force rebuild
-    // For now, a simpleSnackBar to inform
+class _SectionHeader extends StatelessWidget {
+  const _SectionHeader();
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.s4,
+        AppSpacing.s4,
+        AppSpacing.s4,
+        AppSpacing.s1,
+      ),
+      child: Text(
+        AppLocalizations.of(context).translate('language').toUpperCase(),
+        style: AppText.meta.copyWith(
+          color: AppColors.textSecondary,
+          fontWeight: FontWeight.w600,
+          letterSpacing: 0.6,
+        ),
+      ),
+    );
   }
 }

@@ -1,16 +1,21 @@
+// "Create profile" screen — used both for the very first profile and for
+// subsequent additional profiles from Profile screen.
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../localization/app_localizations.dart';
 import '../service/tanglex_service.dart';
+import 'design/design.dart';
 
 class CreateProfileScreen extends ConsumerStatefulWidget {
-  final TanglexService service;
-
   const CreateProfileScreen({super.key, required this.service});
 
+  final TanglexService service;
+
   @override
-  ConsumerState<CreateProfileScreen> createState() => _CreateProfileScreenState();
+  ConsumerState<CreateProfileScreen> createState() =>
+      _CreateProfileScreenState();
 }
 
 class _CreateProfileScreenState extends ConsumerState<CreateProfileScreen> {
@@ -18,8 +23,15 @@ class _CreateProfileScreenState extends ConsumerState<CreateProfileScreen> {
   final _fullNameController = TextEditingController();
   final _shortDescrController = TextEditingController();
   bool _busy = false;
-  String? _result;
   String? _error;
+
+  @override
+  void dispose() {
+    _displayNameController.dispose();
+    _fullNameController.dispose();
+    _shortDescrController.dispose();
+    super.dispose();
+  }
 
   Future<void> _createProfile() async {
     final loc = AppLocalizations.of(context);
@@ -32,7 +44,6 @@ class _CreateProfileScreenState extends ConsumerState<CreateProfileScreen> {
     setState(() {
       _busy = true;
       _error = null;
-      _result = null;
     });
 
     final response = await widget.service.createUserProfile(
@@ -47,119 +58,79 @@ class _CreateProfileScreenState extends ConsumerState<CreateProfileScreen> {
     final hasError = response == null || response.containsKey('error');
     setState(() {
       _busy = false;
-      if (response != null) {
-        _result = response.toString();
-        if (response.containsKey('error')) {
-          _error = response['error']?.toString() ?? _result;
-        }
-      } else {
-        _error = loc.translate('initialization_error');
+      if (hasError) {
+        _error = response?['error']?.toString() ??
+            loc.translate('initialization_error');
       }
     });
 
-    // FIX: ранее экран не закрывался после успешного создания профиля,
-    // и пользователь видел сырой JSON-дамп ответа. Теперь автоматически
-    // возвращаемся назад с флагом true, чтобы родительский экран мог
-    // подхватить новый профиль.
     if (!hasError) {
-      // Небольшая задержка, чтобы пользователь увидел индикацию успеха.
-      await Future<void>.delayed(const Duration(milliseconds: 300));
+      await Future<void>.delayed(const Duration(milliseconds: 200));
       if (!mounted) return;
       Navigator.of(context).pop(true);
     }
   }
 
   @override
-  void dispose() {
-    _displayNameController.dispose();
-    _fullNameController.dispose();
-    _shortDescrController.dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
     final loc = AppLocalizations.of(context);
-    final cs = Theme.of(context).colorScheme;
 
     return Scaffold(
-      appBar: AppBar(
-        title: Text(loc.translate('create_profile')),
-      ),
+      appBar: AppBar(title: Text(loc.translate('create_profile'))),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(AppSpacing.s4),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             TextField(
               controller: _displayNameController,
               decoration: InputDecoration(
                 labelText: loc.translate('display_name'),
-                border: const OutlineInputBorder(),
               ),
               textCapitalization: TextCapitalization.words,
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: AppSpacing.s3),
             TextField(
               controller: _fullNameController,
               decoration: InputDecoration(
                 labelText: loc.translate('full_name'),
-                border: const OutlineInputBorder(),
               ),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: AppSpacing.s3),
             TextField(
               controller: _shortDescrController,
               decoration: InputDecoration(
                 labelText: loc.translate('bio'),
                 hintText: loc.translate('bio_hint'),
-                border: const OutlineInputBorder(),
               ),
               maxLength: 160,
               maxLines: 2,
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: AppSpacing.s4),
             if (_error != null)
               Container(
                 width: double.infinity,
-                padding: const EdgeInsets.all(12),
-                margin: const EdgeInsets.only(bottom: 16),
+                padding: const EdgeInsets.all(AppSpacing.s3),
+                margin: const EdgeInsets.only(bottom: AppSpacing.s4),
                 decoration: BoxDecoration(
-                  color: cs.errorContainer.withOpacity(0.3),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: cs.errorContainer),
+                  color: AppColors.error.withValues(alpha: 0.15),
+                  borderRadius: AppRadius.brs,
+                  border: Border.all(
+                    color: AppColors.error.withValues(alpha: 0.5),
+                  ),
                 ),
                 child: SelectableText(
                   _error!,
-                  style: TextStyle(color: cs.onErrorContainer, fontSize: 13),
+                  style: AppText.caption.copyWith(color: AppColors.error),
                 ),
               ),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton.icon(
-                onPressed: _busy ? null : _createProfile,
-                icon: _busy
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.person_add),
-                label: Text(loc.translate('create')),
-              ),
+            AppPrimaryButton(
+              label: loc.translate('create'),
+              icon: Icons.person_add_rounded,
+              onPressed: _busy ? null : _createProfile,
+              expand: true,
+              loading: _busy,
             ),
-            // FIX: убран блок с сырым JSON ответа SimpleX-core — он не нужен
-            // пользователю и выглядел как ошибка. Успех = автоматический pop
-            // обратно (см. _createProfile).
-            if (_result != null && _error == null) ...[
-              const SizedBox(height: 24),
-              Text(
-                loc.translate('profile_created'),
-                style: TextStyle(
-                  color: cs.onPrimaryContainer,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ],
           ],
         ),
       ),
