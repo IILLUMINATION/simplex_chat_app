@@ -1,3 +1,5 @@
+// Home shell: scaffolds the AppBar, drawer, FAB and hosts the chats list.
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -6,6 +8,7 @@ import '../localization/app_localizations.dart';
 import '../providers/persistent_store.dart';
 import 'chats_screen.dart';
 import 'debug_screen.dart';
+import 'design/design.dart';
 import 'profile_screen.dart';
 import 'settings_screen.dart';
 
@@ -34,8 +37,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       if (!service.isInitialized) {
         await service.initialize();
       }
-    } catch (e) {
-      // Silently fail — user can see logs in debug screen
+    } catch (_) {
+      // Silently fail — user can see logs in debug screen.
     } finally {
       _coreInitializing = false;
     }
@@ -43,125 +46,88 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final loc = AppLocalizations.of(context);
     final profileAsync = ref.watch(persistedProfileProvider);
 
     return Scaffold(
       key: _scaffoldKey,
-      drawer: _buildDrawer(context, loc, profileAsync),
+      backgroundColor: AppColors.bg,
+      drawer: _Drawer(
+        profileAsync: profileAsync,
+        onOpenProfile: () => _push(const ProfileScreen()),
+        onOpenSettings: () => _push(const SettingsScreen()),
+        onOpenDebug: () => _push(const DebugScreenWrapper()),
+      ),
       appBar: AppBar(
-        title: const Text('TangleX Chat'),
+        title: const Text('TangleX'),
         leading: IconButton(
-          icon: const Icon(Icons.menu),
+          icon: const Icon(Icons.menu_rounded),
           onPressed: () => _scaffoldKey.currentState?.openDrawer(),
         ),
-        // FIX: убрана нерабочая кнопка search в AppBar.
-        // Будет возвращена когда реализуем полнотекстовый поиск по чатам.
       ),
       body: const ChatsScreen(),
       floatingActionButton: FloatingActionButton(
         onPressed: () => ref.read(fabActionProvider).trigger(),
-        backgroundColor: const Color(0xFF5A9CF5),
-        elevation: 4,
-        shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.all(Radius.circular(16)),
-        ),
-        child: const Icon(Icons.add, color: Colors.white, size: 28),
+        child: const Icon(Icons.add_rounded, size: AppIconSize.large),
       ),
     );
   }
 
-  void _openDebug(BuildContext context) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => const DebugScreenWrapper()),
-    );
+  void _push(Widget screen) {
+    Navigator.of(context).push(MaterialPageRoute(builder: (_) => screen));
   }
+}
 
-  void _openProfile(BuildContext context) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => const ProfileScreen()),
-    );
-  }
+class _Drawer extends StatelessWidget {
+  const _Drawer({
+    required this.profileAsync,
+    required this.onOpenProfile,
+    required this.onOpenSettings,
+    required this.onOpenDebug,
+  });
 
-  void _openSettings(BuildContext context) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => const SettingsScreen()),
-    );
-  }
+  final AsyncValue<ProfileData?> profileAsync;
+  final VoidCallback onOpenProfile;
+  final VoidCallback onOpenSettings;
+  final VoidCallback onOpenDebug;
 
-  Widget _buildDrawer(
-    BuildContext context,
-    AppLocalizations loc,
-    AsyncValue<ProfileData?> profileAsync,
-  ) {
+  @override
+  Widget build(BuildContext context) {
+    final loc = AppLocalizations.of(context);
     return Drawer(
-      backgroundColor: const Color(0xFF000000),
+      backgroundColor: AppColors.surface1,
       child: SafeArea(
         child: Column(
           children: [
-            // Profile header
-            InkWell(
+            _DrawerProfileHeader(
+              profileAsync: profileAsync,
               onTap: () {
                 Navigator.pop(context);
-                _openProfile(context);
+                onOpenProfile();
               },
-              child: profileAsync.when(
-                loading: () => const Padding(
-                  padding: EdgeInsets.all(20),
-                  child: Center(
-                    child: SizedBox(
-                      width: 24,
-                      height: 24,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Color(0xFF5A9CF5),
-                      ),
-                    ),
-                  ),
-                ),
-                error: (_, __) =>
-                    _DrawerProfilePlaceholder(name: 'Error loading profile'),
-                data: (profile) {
-                  final dn = profile?.displayName ?? '';
-                  final ln = profile?.localDisplayName ?? '';
-                  final name = dn.isNotEmpty
-                      ? dn
-                      : ln.isNotEmpty
-                      ? ln
-                      : 'Profile';
-                  return _DrawerProfilePlaceholder(name: name);
-                },
-              ),
             ),
-            const Divider(color: Color(0xFF333333), height: 1),
-            // Settings — раньше экран был полностью недоступен из UI
-            // несмотря на наличие SettingsScreen (тема/язык).
+            const AppDivider(),
             ListTile(
-              leading: const Icon(Icons.settings, color: Color(0xFF808080)),
-              title: Text(
-                loc.translate('settings'),
-                style: const TextStyle(color: Color(0xFFE8E8E8)),
-              ),
+              leading: const Icon(Icons.settings_rounded),
+              title: Text(loc.translate('settings')),
               onTap: () {
                 Navigator.pop(context);
-                _openSettings(context);
+                onOpenSettings();
               },
             ),
             const Spacer(),
-            const Divider(color: Color(0xFF333333), height: 1),
-            // Debug
+            const AppDivider(),
             ListTile(
-              leading: const Icon(Icons.bug_report, color: Color(0xFF808080)),
+              leading: const Icon(
+                Icons.bug_report_outlined,
+                color: AppColors.textSecondary,
+              ),
               title: Text(
                 loc.translate('debug_console'),
-                style: const TextStyle(color: Color(0xFF808080)),
+                style: AppText.body.copyWith(color: AppColors.textSecondary),
               ),
               onTap: () {
                 Navigator.pop(context);
-                _openDebug(context);
+                onOpenDebug();
               },
             ),
           ],
@@ -171,24 +137,61 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 }
 
-class _DrawerProfilePlaceholder extends StatelessWidget {
-  final String name;
+class _DrawerProfileHeader extends StatelessWidget {
+  const _DrawerProfileHeader({
+    required this.profileAsync,
+    required this.onTap,
+  });
 
-  const _DrawerProfilePlaceholder({required this.name});
+  final AsyncValue<ProfileData?> profileAsync;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(20),
+    final loc = AppLocalizations.of(context);
+
+    return InkWell(
+      onTap: onTap,
+      child: profileAsync.when(
+        loading: () => const Padding(
+          padding: EdgeInsets.all(AppSpacing.s5),
+          child: Center(
+            child: SizedBox(
+              width: 24,
+              height: 24,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: AppColors.accent,
+              ),
+            ),
+          ),
+        ),
+        error: (_, _) => _row(loc.translate('profile_default_name'),
+            loc.translate('profile_tap_to_view')),
+        data: (profile) {
+          final dn = profile?.displayName ?? '';
+          final ln = profile?.localDisplayName ?? '';
+          String name;
+          if (dn.isNotEmpty) {
+            name = dn;
+          } else if (ln.isNotEmpty) {
+            name = ln;
+          } else {
+            name = loc.translate('profile_default_name');
+          }
+          return _row(name, loc.translate('profile_tap_to_view'));
+        },
+      ),
+    );
+  }
+
+  Widget _row(String name, String hint) {
+    return Padding(
+      padding: const EdgeInsets.all(AppSpacing.s5),
       child: Row(
         children: [
-          const CircleAvatar(
-            radius: 28,
-            backgroundColor: Color(0xFF2A2A2A),
-            child: Icon(Icons.person, size: 28, color: Color(0xFF808080)),
-          ),
-          const SizedBox(width: 14),
+          AppAvatar(name: name, size: AppAvatarSize.medium),
+          const SizedBox(width: AppSpacing.s3),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -198,27 +201,22 @@ class _DrawerProfilePlaceholder extends StatelessWidget {
                   name,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Color(0xFFE8E8E8),
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                  ),
+                  style: AppText.bodyEmph,
                 ),
                 const SizedBox(height: 2),
-                const Text(
-                  'Tap to view profile',
-                  style: TextStyle(color: Color(0xFF808080), fontSize: 13),
-                ),
+                Text(hint, style: AppText.caption),
               ],
             ),
           ),
           const Icon(
-            Icons.arrow_forward_ios,
+            Icons.arrow_forward_ios_rounded,
             size: 14,
-            color: Color(0xFF555555),
+            color: AppColors.textSecondary,
           ),
         ],
       ),
     );
   }
 }
+
+
