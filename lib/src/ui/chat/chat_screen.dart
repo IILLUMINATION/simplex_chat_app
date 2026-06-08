@@ -1,6 +1,23 @@
+// Tanglex chat screen — переписан с нуля в build-mode сессии.
+//
+// Цели реврайта:
+//   * Чистая разделённая структура (раньше был монолит на 1.8k строк
+//     с перемешанными слоями загрузки/состояния/UI/жестов).
+//   * Telegram-подобный dark UX: тонкие пузыри, аватары в шапке,
+//     reply-preview, attach-sheet, sticker-sheet.
+//   * Все async-пути аккуратно проверяют mounted перед setState/SnackBar.
+//   * Кружки и аудио-воспроизведение лениво поднимают свои контроллеры,
+//     не дёргают audio focus впустую (см. media_widgets.dart).
+//   * Никаких хардкодных русских строк в snackbar/menu — всё через
+//     AppLocalizations.
+//
+// Внутренние виджеты MessageBubble / MediaGrid / StickerView / VideoCircle /
+// AudioBubble / FileAttachment / SwipeReplyWrapper остаются прежние —
+// они уже выглядят прилично и протестированы.
+
 import 'dart:async';
 import 'dart:io';
-import 'dart:ui';
+import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
@@ -8,6 +25,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:just_audio/just_audio.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 import 'package:video_player/video_player.dart';
@@ -16,16 +34,49 @@ import 'package:video_thumbnail/video_thumbnail.dart' as vthumb;
 import '../../../main.dart';
 import '../../data/pin_store.dart';
 import '../../localization/app_localizations.dart';
-import '../../service/tanglex_service.dart' show ImagePayload, SendMessageResult;
-import 'utils/chat_message_parser.dart'
-    show prepareStickerPreview, compressPreview;
+import '../../service/tanglex_service.dart'
+    show ImagePayload, SendMessageResult;
 import '../../stickers/sticker_store.dart'
     show StickerStore, StickerPack, StickerItem;
-import 'chat_widgets.dart';
-import 'package:just_audio/just_audio.dart';
 import 'audio_player_holder.dart';
+import 'chat_widgets.dart';
+import 'models/chat_message_models.dart';
+import 'utils/chat_message_parser.dart'
+    show
+        compressPreview,
+        makePreview,
+        parseChatItem,
+        prepareStickerPreview,
+        slugify;
 
-/// Функция для парсинга сообщений в isolate (не блокирует UI)
+// =============================================================================
+// THEME
+// =============================================================================
+
+/// Палитра экрана чата. Вынесена в одно место чтобы потом легко свапнуть
+/// или поднять в общий ThemeData.
+class _ChatTheme {
+  static const Color bg = Color(0xFF0E0E10);
+  static const Color appBarBg = Color(0xFF15161A);
+  static const Color composeBg = Color(0xFF15161A);
+  static const Color textPrimary = Color(0xFFE9E9EC);
+  static const Color textSecondary = Color(0xFF8E8E93);
+  static const Color accent = Color(0xFF5A9CF5);
+  static const Color avatarBg = Color(0xFF2A2A2A);
+  static const Color divider = Color(0xFF2C2C2E);
+  static const Color quotedBar = Color(0xFF5A9CF5);
+  static const Color dateChip = Color(0x88202024);
+}
+
+// =============================================================================
+// GLOBAL HELPERS
+// =============================================================================
+
+/// Не сбрасывается между экранами — путь к директории файлов задаёт
+/// SimpleX core один раз через `/_files_folder` (см. TanglexService).
+String? _cachedFilesDir;
+
+/// Парсинг чат-ивентов в отдельном изоляте, чтобы не лагал UI.
 List<UiMessage> _parseMessagesIsolate(Map<String, dynamic> params) {
   final msgs = params['msgs'] as List;
   final filesBaseDir = params['filesBaseDir'] as String?;
@@ -37,113 +88,25 @@ List<UiMessage> _parseMessagesIsolate(Map<String, dynamic> params) {
         filesBaseDir: filesBaseDir,
       );
       if (ui != null) parsed.add(ui);
-    } catch (_) {}
+    } catch (_) {
+      // skip malformed
+    }
   }
   return parsed;
 }
 
-// Глобальный кеш — не сбрасывается при создании новых экранов
-String? _globalFilesDirCache;
-
-class _ChatHeader extends StatelessWidget {
-  final String title;
-  final String chatType;
-  final Uint8List? avatarImage;
-  final Color textPrimary;
-  final Color textSecondary;
-
-  const _ChatHeader({
-    required this.title,
-    required this.chatType,
-    required this.avatarImage,
-    required this.textPrimary,
-    required this.textSecondary,
-  });
-
-  String _subtitle(AppLocalizations loc) {
-    // FIX: ранее были хардкодные русские строки. Английский пользователь
-    // видел "Группа" / "Контакт" / "Чат" вместо локализованной строки.
-    if (chatType == 'group') return loc.translate('chat_type_group');
-    if (chatType == 'contact') return loc.translate('chat_type_contact');
-    return loc.translate('chat_type_chat');
-  }
-
-  String _initials() {
-    final parts = title.trim().split(RegExp(r'\s+'));
-    if (parts.isEmpty) return '';
-    if (parts.length == 1) {
-      final runes = parts.first.runes.toList();
-      final take = runes.take(2).toList();
-      return String.fromCharCodes(take).toUpperCase();
-    }
-    final a = parts[0].runes.isEmpty
-        ? ''
-        : String.fromCharCodes([parts[0].runes.first]);
-    final b = parts[1].runes.isEmpty
-        ? ''
-        : String.fromCharCodes([parts[1].runes.first]);
-    return (a + b).toUpperCase();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final loc = AppLocalizations.of(context);
-    return Row(
-      children: [
-        const SizedBox(width: 4),
-        CircleAvatar(
-          radius: 18,
-          backgroundColor: const Color(0xFF2A2A2A),
-          backgroundImage: avatarImage != null
-              ? MemoryImage(avatarImage!)
-              : null,
-          child: avatarImage == null
-              ? Text(
-                  _initials(),
-                  style: TextStyle(
-                    color: textPrimary,
-                    fontWeight: FontWeight.w600,
-                    fontSize: 12,
-                  ),
-                )
-              : null,
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text(
-                title,
-                style: TextStyle(
-                  color: textPrimary,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: -0.2,
-                ),
-                overflow: TextOverflow.ellipsis,
-              ),
-              const SizedBox(height: 2),
-              Text(
-                _subtitle(loc),
-                style: TextStyle(color: textSecondary, fontSize: 12),
-                overflow: TextOverflow.ellipsis,
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-}
+// =============================================================================
+// PUBLIC ENTRY POINT
+// =============================================================================
 
 class ChatScreen extends ConsumerStatefulWidget {
   final String chatRef;
   final String chatName;
   final Uint8List? avatarImage;
   final String chatType;
-  /// For direct chats: core-reported readiness to send ([ChatPreview.isMessagingReady]).
+
+  /// Поднимается из ChatPreview.isMessagingReady — пока соединение
+  /// не готово, отключаем ComposeBar.
   final bool initialMessagingReady;
 
   const ChatScreen({
@@ -160,213 +123,365 @@ class ChatScreen extends ConsumerStatefulWidget {
 }
 
 class _ChatScreenState extends ConsumerState<ChatScreen> {
+  // ---- text input
   final TextEditingController _msgController = TextEditingController();
-  List<UiMessage> _messages = [];
-  List<_DisplayEntry> _displayEntries = [];
-  bool _loading = true;
+  final FocusNode _msgFocus = FocusNode();
+  bool _composeHasText = false;
+
+  // ---- data
+  List<UiMessage> _messages = const [];
+  List<_DisplayEntry> _displayEntries = const [];
+  final Map<String, int> _displayIndexByKey = {};
+  bool _loadingInitial = true;
+  bool _messagingReady = true;
   bool _sending = false;
   bool _sendingMedia = false;
+
+  // ---- attached file requests dedup
   final Set<int> _autoRequestedFiles = <int>{};
-  String? _filesDir;
-  StreamSubscription<Map<String, dynamic>>? _eventSub;
-  Timer? _refreshDebounce;
+
+  // ---- audio playback
   final AudioPlayer _audioPlayer = AudioPlayerHolder.player;
   AudioNowPlaying? _audioNowPlaying;
   StreamSubscription<PlayerState>? _audioStateSub;
+
+  // ---- stores
   final StickerStore _stickerStore = StickerStore.instance;
   final PinStore _pinStore = PinStore.instance;
-  final ItemScrollController _itemScrollController = ItemScrollController();
-  final ItemPositionsListener _itemPositionsListener =
-      ItemPositionsListener.create();
-  final Map<String, int> _displayIndexByKey = {};
-  UiMessage? _replyTo;
-  bool _circleMode = false;
   int _selectedPackIndex = 0;
-  bool _messagingReady = true;
 
-  int? get _directContactId {
-    final r = widget.chatRef;
-    if (!r.startsWith('@')) return null;
-    return int.tryParse(r.substring(1));
-  }
+  // ---- scrolling
+  final ItemScrollController _scrollController = ItemScrollController();
+  final ItemPositionsListener _positionsListener =
+      ItemPositionsListener.create();
+  bool _showJumpToBottom = false;
 
-  bool get _canCompose =>
-      widget.chatType != 'contact' || _messagingReady;
+  // ---- events
+  StreamSubscription<Map<String, dynamic>>? _eventSub;
+  Timer? _refreshDebounce;
+
+  // ---- reply state
+  UiMessage? _replyTo;
+
+  // =========================================================================
+  // LIFECYCLE
+  // =========================================================================
 
   @override
   void initState() {
     super.initState();
     _messagingReady =
         widget.chatType != 'contact' || widget.initialMessagingReady;
-    final t0 = DateTime.now();
-    debugPrint('💬 ChatScreen initState: ${widget.chatRef}');
-    // Откладываем загрузку чтобы анимация перехода прошла плавно
+    _msgController.addListener(_onComposeTextChanged);
+    _positionsListener.itemPositions.addListener(_onScrollPositionsChanged);
+
+    // Открываем экран мгновенно — данные грузим после первого кадра.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        final t1 = DateTime.now();
-        debugPrint(
-          '📂 Начало загрузки, задержка после кадра: ${t1.difference(t0).inMilliseconds}ms',
-        );
-        _initFilesDir().then((_) {
-          if (mounted) _loadMessages(t0);
-        });
-      }
+      if (!mounted) return;
+      _initFilesDir().then((_) {
+        if (mounted) _loadMessages(initial: true);
+      });
     });
-    // load() возвращает кэшированный Future при повторных вызовах,
-    // а очередь записи в PinStore сама дождётся завершения load
-    // перед pin/unpin — поэтому достаточно "огневой" инициации.
+
     unawaited(_pinStore.load());
     unawaited(_stickerStore.ensureLoaded());
+
     _eventSub = ref
         .read(tanglexServiceProvider)
         .eventStream
         .listen(_handleEvent);
-    _audioStateSub = _audioPlayer.playerStateStream.listen((state) {
-      if (!mounted) return;
-      if (state.processingState == ProcessingState.completed ||
-          state.processingState == ProcessingState.idle) {
-        if (_audioNowPlaying != null) {
-          setState(() => _audioNowPlaying = null);
-        }
-      }
-    });
+
+    _audioStateSub = _audioPlayer.playerStateStream.listen(_handleAudioState);
   }
 
-  Future<void> _initFilesDir() async {
-    // Глобальный кеш — не сбрасывается при создании новых экранов
-    if (_globalFilesDirCache != null) {
-      _filesDir = _globalFilesDirCache!;
-      return;
+  @override
+  void dispose() {
+    _msgController.removeListener(_onComposeTextChanged);
+    _msgController.dispose();
+    _msgFocus.dispose();
+    _positionsListener.itemPositions.removeListener(_onScrollPositionsChanged);
+    _refreshDebounce?.cancel();
+    _eventSub?.cancel();
+    _audioStateSub?.cancel();
+    super.dispose();
+  }
+
+  void _onComposeTextChanged() {
+    final hasText = _msgController.text.trim().isNotEmpty;
+    if (hasText != _composeHasText) {
+      setState(() => _composeHasText = hasText);
     }
-    final t0 = DateTime.now();
+  }
+
+  void _onScrollPositionsChanged() {
+    final positions = _positionsListener.itemPositions.value;
+    if (positions.isEmpty) return;
+    // Reverse-scrolled list — bottom = первый элемент.
+    final minIndex = positions
+        .map((p) => p.index)
+        .reduce((a, b) => a < b ? a : b);
+    final show = minIndex > 3;
+    if (show != _showJumpToBottom) {
+      setState(() => _showJumpToBottom = show);
+    }
+  }
+
+  // =========================================================================
+  // DATA LOADING
+  // =========================================================================
+
+  Future<void> _initFilesDir() async {
+    if (_cachedFilesDir != null) return;
     try {
       final docs = await getApplicationDocumentsDirectory();
       final dir = Directory('${docs.path}/files');
       if (!await dir.exists()) {
         await dir.create(recursive: true);
       }
-      _filesDir = dir.path;
-      _globalFilesDirCache = dir.path;
-      debugPrint(
-        '📁 _initFilesDir: ${DateTime.now().difference(t0).inMilliseconds}ms',
-      );
-    } catch (_) {}
+      _cachedFilesDir = dir.path;
+    } catch (_) {
+      // best-effort
+    }
   }
 
-  Future<void> _loadMessages([DateTime? openedAt]) async {
-    final tStart = DateTime.now();
-    final refTime = openedAt ?? tStart;
-    if (openedAt != null) {
-      debugPrint(
-        '⏳ _loadMessages: начало (общее время: ${tStart.difference(openedAt).inMilliseconds}ms)',
-      );
-    }
+  Future<void> _loadMessages({bool initial = false}) async {
     try {
-      setState(() => _loading = _messages.isEmpty);
+      if (initial && mounted) {
+        setState(() => _loadingInitial = _messages.isEmpty);
+      }
       final service = ref.read(tanglexServiceProvider);
-      final tBeforeGet = DateTime.now();
-      final msgs = await service.getChatMessages(widget.chatRef);
-      debugPrint(
-        '📨 getChatMessages: ${msgs.length} шт, заняло ${DateTime.now().difference(tBeforeGet).inMilliseconds}ms',
-      );
-      final tBeforeParse = DateTime.now();
-      // Парсим в isolate чтобы не блокировать UI
-      final List<Map<String, dynamic>> jsonMsgs = msgs
-          .map((m) => Map<String, dynamic>.from(m))
-          .toList();
+      final raw = await service.getChatMessages(widget.chatRef);
       final parsed = await compute(_parseMessagesIsolate, {
-        'msgs': jsonMsgs,
-        'filesBaseDir': _filesDir,
+        'msgs': raw.map((m) => Map<String, dynamic>.from(m)).toList(),
+        'filesBaseDir': _cachedFilesDir,
       });
+      // Сортируем по убыванию времени (свежие — в начале).
       parsed.sort((a, b) {
         final at = a.time ?? DateTime.fromMillisecondsSinceEpoch(0);
         final bt = b.time ?? DateTime.fromMillisecondsSinceEpoch(0);
         return bt.compareTo(at);
       });
-      if (!mounted) return;
-      final tBeforeSetState = DateTime.now();
-      setState(() {
-        _applyMessages(parsed);
-        _loading = false;
-      });
-      debugPrint(
-        '✅ Сообщения загружены: ${parsed.length} шт, парсинг: ${tBeforeSetState.difference(tBeforeParse).inMilliseconds}ms, '
-        'всего: ${DateTime.now().difference(refTime).inMilliseconds}ms',
-      );
 
+      // /pin sentinel cleanup (как в прошлом клиенте — закрепы локальные).
       final pinPattern = RegExp(r'^/pin\s+');
       final shortPin = RegExp(r'^/p\s+');
-      bool anyChanged = false;
       final cleaned = <UiMessage>[];
       for (final m in parsed) {
         if (pinPattern.hasMatch(m.text) || shortPin.hasMatch(m.text)) {
-          final actualText = m.text
+          final actual = m.text
               .replaceFirst(pinPattern, '')
               .replaceFirst(shortPin, '');
           if (!_pinStore.isPinned(widget.chatRef, m.key)) {
-            await _pinStore.pin(
-              PinnedMessage(
-                chatRef: widget.chatRef,
-                key: m.key,
-                text: actualText,
-                imageFilePath: m.images.isNotEmpty
-                    ? m.images.first.filePath
-                    : null,
-                timeStr: m.timeStr,
-                pinnedAt: DateTime.now(),
+            unawaited(
+              _pinStore.pin(
+                PinnedMessage(
+                  chatRef: widget.chatRef,
+                  key: m.key,
+                  text: actual,
+                  imageFilePath: m.images.isNotEmpty
+                      ? m.images.first.filePath
+                      : null,
+                  timeStr: m.timeStr,
+                  pinnedAt: DateTime.now(),
+                ),
               ),
             );
           }
-          cleaned.add(
-            UiMessage(
-              key: m.key,
-              text: actualText,
-              fromMe: m.fromMe,
-              timeStr: m.timeStr,
-              status: m.status,
-              isSystem: m.isSystem,
-              images: m.images,
-              time: m.time,
-              audio: m.audio,
-              fileName: m.fileName,
-              fileSize: m.fileSize,
-              filePath: m.filePath,
-              quoted: m.quoted,
-              itemId: m.itemId,
-            ),
-          );
-          anyChanged = true;
+          cleaned.add(_withText(m, actual));
         } else {
           cleaned.add(m);
         }
       }
-      if (anyChanged && mounted) {
-        setState(() => _applyMessages(cleaned));
-      }
-      if (!mounted) return;
 
-      await _autoReceiveImages(anyChanged ? cleaned : parsed);
+      if (!mounted) return;
+      setState(() {
+        _messages = cleaned;
+        _displayEntries = _buildDisplayEntries(cleaned);
+        _displayIndexByKey
+          ..clear()
+          ..addAll({
+            for (var i = 0; i < _displayEntries.length; i++)
+              if (_displayEntries[i].message != null)
+                _displayEntries[i].message!.key: i,
+          });
+        _loadingInitial = false;
+      });
+
+      await _autoReceiveImages(cleaned);
       await _refreshMessagingReadyFlag();
     } catch (e) {
-      debugPrint('Error loading messages: $e');
+      debugPrint('chat: loadMessages error: $e');
       if (mounted) {
-        setState(() => _loading = false);
+        setState(() => _loadingInitial = false);
       }
     }
   }
+
+  UiMessage _withText(UiMessage m, String newText) => UiMessage(
+        key: m.key,
+        text: newText,
+        fromMe: m.fromMe,
+        timeStr: m.timeStr,
+        status: m.status,
+        isSystem: m.isSystem,
+        images: m.images,
+        time: m.time,
+        itemId: m.itemId,
+        quoted: m.quoted,
+        audio: m.audio,
+        fileName: m.fileName,
+        fileSize: m.fileSize,
+        filePath: m.filePath,
+        fileId: m.fileId,
+        fileStatusType: m.fileStatusType,
+        transferProgress: m.transferProgress,
+        transferTotal: m.transferTotal,
+      );
 
   Future<void> _refreshMessagingReadyFlag() async {
     if (widget.chatType != 'contact') return;
     final service = ref.read(tanglexServiceProvider);
     final ready = await service.getContactMessagingReady(widget.chatRef);
     if (!mounted || ready == null) return;
-    setState(() => _messagingReady = ready);
+    if (ready != _messagingReady) {
+      setState(() => _messagingReady = ready);
+    }
   }
 
-  String _labelForSendFailure(
-    AppLocalizations loc,
-    SendMessageResult r,
-  ) {
+  Future<void> _autoReceiveImages(List<UiMessage> msgs) async {
+    final service = ref.read(tanglexServiceProvider);
+    for (final m in msgs) {
+      for (final img in m.images) {
+        if (img.fileId == null) continue;
+        if (img.filePath != null && File(img.filePath!).existsSync()) continue;
+        if (img.fileStatusType != 'rcvInvitation') continue;
+        if (img.fileSize != null && img.fileSize! > 1024 * 1024 * 25) continue;
+        if (!_autoRequestedFiles.add(img.fileId!)) continue;
+        unawaited(
+          service.receiveFile(
+            img.fileId!,
+            approvedRelays: true,
+            encrypt: false,
+            filePath: _cachedFilesDir,
+          ),
+        );
+      }
+    }
+  }
+
+  // =========================================================================
+  // EVENTS
+  // =========================================================================
+
+  void _handleEvent(Map<String, dynamic> event) {
+    final result = event['result'];
+    if (result is! Map) return;
+    final type = result['type'] as String?;
+    if (type == null) return;
+    const interesting = {
+      'chatItemNew',
+      'newChatItems',
+      'chatItem',
+      'chatItemUpdated',
+      'chatItemsDeleted',
+      'chatItemsStatusesUpdated',
+      'groupChatItemsDeleted',
+      'rcvFileSndCancelled',
+      'rcvFileComplete',
+      'sndFileComplete',
+      'rcvFileStart',
+      'sndFileStart',
+      'rcvFileProgressXFTP',
+      'sndFileProgressXFTP',
+      'contactSndReady',
+    };
+    if (interesting.contains(type)) {
+      _scheduleRefresh();
+    }
+    if (type == 'contactSndReady' && widget.chatType == 'contact') {
+      _refreshMessagingReadyFlag();
+    }
+  }
+
+  void _scheduleRefresh() {
+    _refreshDebounce?.cancel();
+    _refreshDebounce = Timer(const Duration(milliseconds: 250), () {
+      if (mounted) _loadMessages();
+    });
+  }
+
+  void _handleAudioState(PlayerState state) {
+    if (!mounted) return;
+    if (state.processingState == ProcessingState.completed ||
+        state.processingState == ProcessingState.idle) {
+      if (_audioNowPlaying != null) {
+        setState(() => _audioNowPlaying = null);
+      }
+    }
+  }
+
+  // =========================================================================
+  // SENDING
+  // =========================================================================
+
+  bool get _canCompose => widget.chatType != 'contact' || _messagingReady;
+
+  Future<void> _sendText() async {
+    final text = _msgController.text.trim();
+    if (text.isEmpty || _sending || !_canCompose) return;
+    final replyId = _replyTo?.itemId;
+    _msgController.clear();
+    setState(() => _sending = true);
+
+    // Локальный pin sentinel ("/pin ..." и "/p ...") — поддерживаем как
+    // раньше: после успешной отправки берём последнее сообщение и пинним.
+    final pinPattern = RegExp(r'^/pin\s+');
+    final shortPin = RegExp(r'^/p\s+');
+    final isPinCmd = pinPattern.hasMatch(text) || shortPin.hasMatch(text);
+    final actualText = isPinCmd
+        ? text.replaceFirst(pinPattern, '').replaceFirst(shortPin, '')
+        : text;
+
+    final service = ref.read(tanglexServiceProvider);
+    final result = await service.sendMessage(
+      widget.chatRef,
+      actualText,
+      quotedItemId: replyId,
+    );
+
+    if (!mounted) return;
+    if (!result.ok) {
+      _msgController.text = text;
+      final loc = AppLocalizations.of(context);
+      _snack(_labelForSendFailure(loc, result));
+    } else {
+      await _loadMessages();
+      if (isPinCmd && _messages.isNotEmpty) {
+        final last = _messages.first;
+        unawaited(
+          _pinStore.pin(
+            PinnedMessage(
+              chatRef: widget.chatRef,
+              key: last.key,
+              text: last.text,
+              imageFilePath:
+                  last.images.isNotEmpty ? last.images.first.filePath : null,
+              timeStr: last.timeStr,
+              pinnedAt: DateTime.now(),
+            ),
+          ),
+        );
+      }
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _sending = false;
+      _replyTo = null;
+    });
+  }
+
+  String _labelForSendFailure(AppLocalizations loc, SendMessageResult r) {
     switch (r.errorType) {
       case 'contactNotReady':
         return loc.translate('send_error_contact_not_ready');
@@ -377,80 +492,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       case 'parseError':
         return loc.translate('send_error_parse');
       default:
-        if (r.detail != null && r.detail!.trim().isNotEmpty) {
-          return loc
-              .translate('failed_send_error')
-              .replaceAll('%s', r.detail!.trim());
-        }
-        return loc
-            .translate('failed_send_error')
-            .replaceAll('%s', r.errorType ?? '?');
+        return r.detail ?? loc.translate('send_error_no_response');
     }
-  }
-
-  Future<void> _sendMessage() async {
-    final text = _msgController.text.trim();
-    if (text.isEmpty || _sending) return;
-    if (!_canCompose) return;
-
-    _msgController.clear();
-    setState(() => _sending = true);
-
-    final pinCommand = RegExp(r'^/pin\s+');
-    final shortPin = RegExp(r'^/p\s+');
-    final shouldPin = pinCommand.hasMatch(text) || shortPin.hasMatch(text);
-    String actualText = shouldPin
-        ? text.replaceFirst(pinCommand, '').replaceFirst(shortPin, '')
-        : text;
-    final quotedItemId = _replyTo?.itemId;
-
-    final service = ref.read(tanglexServiceProvider);
-    final sendResult = await service.sendMessage(
-      widget.chatRef,
-      actualText,
-      quotedItemId: quotedItemId,
-    );
-    final success = sendResult.ok;
-
-    if (!success && mounted) {
-      _msgController.text = text;
-      final loc = AppLocalizations.of(context);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(_labelForSendFailure(loc, sendResult)),
-          backgroundColor: const Color(0xFFCF6679),
-        ),
-      );
-    }
-
-    if (success && shouldPin) {
-      await Future.delayed(const Duration(milliseconds: 500));
-      await _loadMessages();
-      if (_messages.isNotEmpty) {
-        final lastMsg = _messages.first;
-        await _pinStore.pin(
-          PinnedMessage(
-            chatRef: widget.chatRef,
-            key: lastMsg.key,
-            text: lastMsg.text,
-            imageFilePath: lastMsg.images.isNotEmpty
-                ? lastMsg.images.first.filePath
-                : null,
-            timeStr: lastMsg.timeStr,
-            pinnedAt: DateTime.now(),
-          ),
-        );
-      }
-    } else if (success) {
-      await _loadMessages();
-      await _refreshMessagingReadyFlag();
-    }
-
-    if (!mounted) return;
-    setState(() {
-      _sending = false;
-      _replyTo = null;
-    });
   }
 
   Future<void> _sendImages() async {
@@ -458,6 +501,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final picker = ImagePicker();
     final files = await picker.pickMultiImage(imageQuality: 90);
     if (files.isEmpty) return;
+    if (!mounted) return;
     setState(() => _sendingMedia = true);
     final service = ref.read(tanglexServiceProvider);
     final payload = <ImagePayload>[];
@@ -477,98 +521,99 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       payload,
       quotedItemId: _replyTo?.itemId,
     );
+    if (!mounted) return;
     if (ok) {
       await _loadMessages();
-      if (mounted) setState(() => _replyTo = null);
     }
     if (!mounted) return;
-    setState(() => _sendingMedia = false);
+    setState(() {
+      _sendingMedia = false;
+      if (ok) _replyTo = null;
+    });
   }
 
-  Future<void> _pickVideo() async {
-    final loc = AppLocalizations.of(context);
+  Future<void> _pickAndSendVideo() async {
     if (_sendingMedia) return;
     final picker = ImagePicker();
-    final file = await picker.pickVideo(source: ImageSource.gallery);
-    if (file == null) return;
+    final f = await picker.pickVideo(source: ImageSource.gallery);
+    if (f == null) return;
+    if (!mounted) return;
     setState(() => _sendingMedia = true);
     final service = ref.read(tanglexServiceProvider);
-    final thumb = await _generateVideoThumb(file.path);
-    final duration = await _getVideoDuration(file.path);
-    final resultSend = await service.sendVideo(
+    final thumb = await _generateVideoThumb(f.path);
+    final duration = await _getVideoDuration(f.path);
+    final res = await service.sendVideo(
       chatRef: widget.chatRef,
-      filePath: file.path,
+      filePath: f.path,
       previewBytes: thumb.bytes,
       durationSec: duration,
       isCircle: false,
       quotedItemId: _replyTo?.itemId,
     );
-    if (resultSend.ok) {
+    if (!mounted) return;
+    if (res.ok) {
       await _loadMessages();
-      if (mounted) setState(() => _replyTo = null);
-    } else if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            resultSend.error == null
-                ? loc.translate('failed_send_video')
-                : loc
-                      .translate('failed_send_error')
-                      .replaceAll('%s', resultSend.error ?? ''),
-          ),
-        ),
+    } else {
+      final loc = AppLocalizations.of(context);
+      _snack(
+        res.error == null
+            ? loc.translate('failed_send_video')
+            : loc
+                .translate('failed_send_error')
+                .replaceAll('%s', res.error ?? ''),
       );
     }
     if (!mounted) return;
-    setState(() => _sendingMedia = false);
+    setState(() {
+      _sendingMedia = false;
+      if (res.ok) _replyTo = null;
+    });
   }
 
-  Future<void> _pickFile({bool audioOnly = false}) async {
-    final loc = AppLocalizations.of(context);
+  Future<void> _pickAndSendFile({bool audioOnly = false}) async {
     if (_sendingMedia) return;
-    final res = await FilePicker.platform.pickFiles(
+    final picked = await FilePicker.platform.pickFiles(
       type: audioOnly ? FileType.audio : FileType.any,
       withData: false,
     );
-    if (res == null || res.files.isEmpty) return;
-    final path = res.files.single.path;
+    if (picked == null || picked.files.isEmpty) return;
+    final path = picked.files.single.path;
     if (path == null) return;
+    if (!mounted) return;
     setState(() => _sendingMedia = true);
-    final service = ref.read(tanglexServiceProvider);
-    final stablePath = await _maybePersistPickedFile(
-      path,
-      audioOnly: audioOnly,
-    );
-    final lower = stablePath.toLowerCase();
-    final isStickerFile = lower.endsWith('.webp') || lower.endsWith('.webm');
+    final stable = await _persistAudioFile(path, audioOnly: audioOnly);
+    final lower = stable.toLowerCase();
+    final isStickerFile =
+        lower.endsWith('.webp') || lower.endsWith('.webm');
     final tagText = isStickerFile ? '/sticker' : '';
-    final resultSend = await service.sendFile(
+    final service = ref.read(tanglexServiceProvider);
+    final res = await service.sendFile(
       chatRef: widget.chatRef,
-      filePath: stablePath,
+      filePath: stable,
       text: tagText,
       quotedItemId: _replyTo?.itemId,
     );
-    if (resultSend.ok) {
+    if (!mounted) return;
+    if (res.ok) {
       await _loadMessages();
-      if (mounted) setState(() => _replyTo = null);
-    } else if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            resultSend.error == null
-                ? loc.translate('failed_send_file')
-                : loc
-                      .translate('failed_send_error')
-                      .replaceAll('%s', resultSend.error ?? ''),
-          ),
-        ),
+    } else {
+      final loc = AppLocalizations.of(context);
+      _snack(
+        res.error == null
+            ? loc.translate('failed_send_file')
+            : loc
+                .translate('failed_send_error')
+                .replaceAll('%s', res.error ?? ''),
       );
     }
     if (!mounted) return;
-    setState(() => _sendingMedia = false);
+    setState(() {
+      _sendingMedia = false;
+      if (res.ok) _replyTo = null;
+    });
   }
 
-  Future<String> _maybePersistPickedFile(
+  Future<String> _persistAudioFile(
     String path, {
     required bool audioOnly,
   }) async {
@@ -577,8 +622,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     try {
       final docs = await getApplicationDocumentsDirectory();
       final dir = Directory('${docs.path}/media_cache');
-      // FIX: sync IO в UI потоке → async, иначе на медленных дисках
-      // фризы при отправке файла.
       if (!await dir.exists()) {
         await dir.create(recursive: true);
       }
@@ -610,1184 +653,25 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     return path.substring(idx);
   }
 
-  Future<void> _sendSticker(StickerPack pack, StickerItem sticker) async {
-    final loc = AppLocalizations.of(context);
-    if (_sendingMedia) return;
-    setState(() => _sendingMedia = true);
-    final service = ref.read(tanglexServiceProvider);
-    final preview = await _generateStickerPreview(sticker.filePath);
-    final result = await service.sendSticker(
-      chatRef: widget.chatRef,
-      filePath: sticker.filePath,
-      previewBytes: preview.bytes,
-      previewMime: preview.mime,
-      packId: pack.id,
-      stickerId: sticker.id,
-    );
-    if (result.ok) {
-      await _loadMessages();
-    } else if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            result.error == null
-                ? loc.translate('failed_send_sticker')
-                : 'Не удалось отправить: ${result.error}',
-          ),
-        ),
-      );
-    }
-    if (!mounted) return;
-    setState(() => _sendingMedia = false);
-  }
-
-  Future<void> _openStickerPicker() async {
-    await _stickerStore.ensureLoaded();
-    if (!mounted) return;
-    showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      isScrollControlled: true,
-      builder: (ctx) {
-        return StickerPickerSheet(
-          packs: _stickerStore.packs,
-          onImport: () async {
-            final res = await FilePicker.platform.pickFiles(
-              type: FileType.custom,
-              allowedExtensions: ['sxpz', 'zip'],
-            );
-            if (res == null || res.files.isEmpty) return;
-            final path = res.files.single.path;
-            if (path == null) return;
-            final pack = await _stickerStore.importZip(path);
-            if (pack != null && mounted) setState(() {});
-          },
-          onCreate: () async {
-            final created = await _createStickerPack();
-            if (created != null && mounted) setState(() {});
-          },
-          onExport: _selectedPackIndex >= 0
-              ? () async {
-                  if (_selectedPackIndex < _stickerStore.packs.length) {
-                    final pack = _stickerStore.packs[_selectedPackIndex];
-                    final path = await _stickerStore.exportPack(
-                      packId: pack.id,
-                    );
-                    if (path != null && mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('Exported to $path')),
-                      );
-                    }
-                  }
-                }
-              : null,
-          onPackSelected: (index) {
-            setState(() => _selectedPackIndex = index);
-          },
-          onSend: (pack, item) {
-            Navigator.of(ctx).pop();
-            _sendSticker(pack, item);
-          },
-        );
-      },
-    );
-  }
-
-  Future<StickerPack?> _createStickerPack() async {
-    final loc = AppLocalizations.of(context);
-    final nameCtrl = TextEditingController();
-    final idCtrl = TextEditingController();
-    final authorCtrl = TextEditingController();
-    // FIX: ранее Cancel и Next имели одинаковый onPressed (`pop()` без
-    // возврата значения), и после диалога код всегда переходил к picker'у,
-    // если поля были заполнены. Теперь возвращаем bool, чтобы явно
-    // отличить отмену от подтверждения.
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) {
-        return AlertDialog(
-          title: Text(loc.translate('new_sticker_pack')),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: nameCtrl,
-                decoration: InputDecoration(
-                  labelText: loc.translate('sticker_name'),
-                ),
-                onChanged: (v) {
-                  if (idCtrl.text.isEmpty) {
-                    idCtrl.text = slugify(v);
-                  }
-                },
-              ),
-              TextField(
-                controller: idCtrl,
-                decoration: InputDecoration(
-                  labelText: loc.translate('sticker_id'),
-                ),
-              ),
-              TextField(
-                controller: authorCtrl,
-                decoration: InputDecoration(
-                  labelText: loc.translate('sticker_author'),
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(false),
-              child: Text(loc.translate('cancel')),
-            ),
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(true),
-              child: Text(loc.translate('sticker_next')),
-            ),
-          ],
-        );
-      },
-    );
-    if (confirmed != true) return null;
-    final name = nameCtrl.text.trim();
-    final id = idCtrl.text.trim();
-    if (name.isEmpty || id.isEmpty) return null;
-    final res = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: ['webp', 'webm'],
-      allowMultiple: true,
-    );
-    if (res == null || res.files.isEmpty) return null;
-    final paths = res.files.map((e) => e.path).whereType<String>().toList();
-    return await _stickerStore.createPack(
-      packId: id,
-      name: name,
-      author: authorCtrl.text.trim().isEmpty ? null : authorCtrl.text.trim(),
-      filePaths: paths,
-    );
-  }
-
-  void _openAttachMenu() {
-    final loc = AppLocalizations.of(context);
-    showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      builder: (ctx) {
-        return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ListTile(
-                leading: const Icon(Icons.photo),
-                title: Text(loc.translate('photo')),
-                onTap: () {
-                  Navigator.of(ctx).pop();
-                  _sendImages();
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.videocam),
-                title: Text(loc.translate('video')),
-                onTap: () {
-                  Navigator.of(ctx).pop();
-                  _pickVideo();
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.music_note),
-                title: Text(loc.translate('audio')),
-                onTap: () {
-                  Navigator.of(ctx).pop();
-                  _pickFile(audioOnly: true);
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.attach_file),
-                title: Text(loc.translate('file')),
-                onTap: () {
-                  Navigator.of(ctx).pop();
-                  _pickFile(audioOnly: false);
-                },
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  Future<void> _playAudio(AudioItem audio) async {
-    if (audio.filePath == null) return;
-    if (!File(audio.filePath!).existsSync()) {
-      if (mounted) {
-        final loc = AppLocalizations.of(context);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(loc.translate('audio_unavailable'))),
-        );
-      }
-      return;
-    }
-    try {
-      final isSame = _audioNowPlaying?.filePath == audio.filePath;
-      if (!isSame) {
-        await _audioPlayer.setFilePath(audio.filePath!);
-        await _audioPlayer.play();
-      } else {
-        if (_audioPlayer.playing) {
-          await _audioPlayer.pause();
-        } else {
-          await _audioPlayer.play();
-        }
-      }
-      setState(() {
-        _audioNowPlaying = AudioNowPlaying(
-          filePath: audio.filePath!,
-          title: audio.title,
-        );
-      });
-    } catch (_) {}
-  }
-
-  Future<void> _stopAudio() async {
-    try {
-      await _audioPlayer.stop();
-    } catch (_) {}
-    if (mounted) {
-      setState(() => _audioNowPlaying = null);
-    }
-  }
-
-  void _openMedia(List<UiImage> images, int index) {
-    final img = images[index];
-    if (img.isVideo && !img.isCircle) {
-      if (img.filePath == null) {
-        final loc = AppLocalizations.of(context);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(loc.translate('file_not_loaded'))),
-        );
-        return;
-      }
-      Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => VideoPlayerScreen(filePath: img.filePath!),
-          fullscreenDialog: true,
-        ),
-      );
-      return;
-    }
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => GalleryView(images: images, initial: index),
-        fullscreenDialog: true,
-      ),
-    );
-  }
-
-  Future<void> _requestAudioFile(AudioItem audio) async {
-    final fileId = audio.fileId;
-    if (fileId == null) return;
-    final service = ref.read(tanglexServiceProvider);
-    try {
-      final ok = await service.receiveFile(
-        fileId,
-        approvedRelays: true,
-        encrypt: false,
-        filePath: _filesDir,
-      );
-      if (ok && mounted) await _loadMessages();
-    } catch (e) {
-      debugPrint('Error requesting audio file: $e');
-    }
-  }
-
-  Future<void> _requestFile(UiMessage message) async {
-    final fileId = message.fileId;
-    if (fileId == null) return;
-    if (_filesDir == null) return;
-    final service = ref.read(tanglexServiceProvider);
-    try {
-      final ok = await service.receiveFile(
-        fileId,
-        approvedRelays: true,
-        encrypt: false,
-        filePath: _filesDir,
-      );
-      if (ok && mounted) await _loadMessages();
-    } catch (e) {
-      debugPrint('Error requesting file: $e');
-    }
-  }
-
-  Future<void> _openCircleRecorder() async {
-    final loc = AppLocalizations.of(context);
-    if (_sendingMedia) return;
-    final result = await Navigator.of(context).push<CircleVideoResult>(
-      MaterialPageRoute(
-        builder: (_) => const CircleRecorderScreen(),
-        fullscreenDialog: true,
-      ),
-    );
-    if (result == null) return;
-    if (!mounted) return;
-    setState(() => _sendingMedia = true);
-    final service = ref.read(tanglexServiceProvider);
-    final resultSend = await service.sendVideo(
-      chatRef: widget.chatRef,
-      filePath: result.filePath,
-      previewBytes: result.previewBytes,
-      durationSec: result.durationSec,
-      isCircle: true,
-      quotedItemId: _replyTo?.itemId,
-    );
-    if (resultSend.ok) {
-      await _loadMessages();
-      if (mounted) setState(() => _replyTo = null);
-    } else if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            resultSend.error == null
-                ? loc.translate('failed_send_circle')
-                : loc
-                      .translate('failed_send_error')
-                      .replaceAll('%s', resultSend.error ?? ''),
-          ),
-        ),
-      );
-    }
-    if (!mounted) return;
-    setState(() => _sendingMedia = false);
-  }
-
-  void _handleEvent(Map<String, dynamic> event) {
-    final result = event['result'];
-    if (result is! Map<String, dynamic>) return;
-    final type = result['type'] as String?;
-    if (type == null) return;
-
-    if (type == 'contactSndReady' ||
-        type == 'acceptingContactRequest' ||
-        type == 'contactConnecting') {
-      final c = result['contact'];
-      if (c is Map) {
-        final id = c['contactId'] as int?;
-        if (id != null && id == _directContactId) {
-          unawaited(_refreshMessagingReadyFlag());
-        }
-      }
-    }
-
-    final chatItems = <Map<String, dynamic>>[];
-    if (result['chatItem'] is Map<String, dynamic>) {
-      chatItems.add(Map<String, dynamic>.from(result['chatItem']));
-    }
-    if (result['chatItems'] is List) {
-      for (final item in result['chatItems'] as List) {
-        if (item is Map<String, dynamic>) {
-          chatItems.add(Map<String, dynamic>.from(item));
-        }
-      }
-    }
-    if (chatItems.isEmpty) return;
-
-    for (final item in chatItems) {
-      final chatInfo = item['chatInfo'] as Map<String, dynamic>?;
-      if (chatInfo == null) continue;
-      final ref = chatRefFromInfo(chatInfo);
-      if (ref == widget.chatRef) {
-        _scheduleRefresh();
-        return;
-      }
-    }
-  }
-
-  void _scheduleRefresh() {
-    _refreshDebounce?.cancel();
-    _refreshDebounce = Timer(const Duration(milliseconds: 250), () {
-      if (mounted) _loadMessages();
-    });
-  }
-
-  List<_DisplayEntry> _buildDisplayEntries(List<UiMessage> messages) {
-    _displayIndexByKey.clear();
-    final entries = <_DisplayEntry>[];
-    DateTime? lastDate;
-    int i = 0;
-    while (i < messages.length) {
-      final m = messages[i];
-      if (m.time != null) {
-        final msgDate = DateTime(m.time!.year, m.time!.month, m.time!.day);
-        if (lastDate == null) {
-          lastDate = msgDate;
-        } else if (msgDate != lastDate) {
-          entries.add(_DisplayEntry.date(lastDate));
-          lastDate = msgDate;
-        }
-      }
-
-      if (!m.isSystem && m.images.isNotEmpty) {
-        final group = <UiMessage>[m];
-        int j = i + 1;
-        while (j < messages.length) {
-          final next = messages[j];
-          final canGroup =
-              !next.isSystem &&
-              next.images.isNotEmpty &&
-              next.fromMe == m.fromMe &&
-              next.text.isEmpty &&
-              m.text.isEmpty &&
-              !next.images.any((e) => e.isVideo || e.isCircle) &&
-              !m.images.any((e) => e.isVideo || e.isCircle) &&
-              !next.images.any((e) => e.isSticker) &&
-              !m.images.any((e) => e.isSticker) &&
-              closeInTime(m.time, next.time, const Duration(minutes: 5));
-          if (!canGroup) break;
-          group.add(next);
-          j++;
-        }
-        final allImages = group.expand((g) => g.images).toList();
-        final entryIndex = entries.length;
-        for (final g in group) {
-          _displayIndexByKey[g.key] = entryIndex;
-        }
-        entries.add(
-          _DisplayEntry.group(
-            UiMessage(
-              key: 'group_${m.key}',
-              text: m.text,
-              fromMe: m.fromMe,
-              timeStr: m.timeStr,
-              status: m.status,
-              isSystem: false,
-              images: allImages,
-              time: m.time,
-            ),
-          ),
-        );
-        i = j;
-        continue;
-      }
-      if (m.isSystem) {
-        entries.add(_DisplayEntry.system(m));
-      } else {
-        _displayIndexByKey[m.key] = entries.length;
-        entries.add(_DisplayEntry.message(m));
-      }
-      i++;
-    }
-    if (lastDate != null) {
-      entries.add(_DisplayEntry.date(lastDate));
-    }
-    return entries;
-  }
-
-  void _applyMessages(List<UiMessage> messages) {
-    _messages = messages;
-    _displayEntries = _buildDisplayEntries(messages);
-  }
-
-  Widget _buildMessageBubble(UiMessage m) {
-    final isPinned = _pinStore.isPinned(widget.chatRef, m.key);
-    return MessageBubble(
-      message: m,
-      onDownloadImage: _requestFullImage,
-      onOpenMedia: _openMedia,
-      onPlayAudio: _playAudio,
-      onDownloadAudio: _requestAudioFile,
-      onDownloadFile: _requestFile,
-      isPinned: isPinned,
-      audioPlayer: _audioPlayer,
-      nowPlaying: _audioNowPlaying,
-      onLongPress: (d, ctx) =>
-          _showMessageOptions(ctx, d.globalPosition, m, isPinned),
-      onSwipeReply: () {
-        if (m.itemId == null) {
-          final loc = AppLocalizations.of(context);
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(loc.translate('reply_unavailable'))),
-          );
-          return;
-        }
-        setState(() => _replyTo = m);
-      },
-      onQuotedTap: () {
-        final quotedKey = m.quoted?.itemId;
-        if (quotedKey != null) {
-          // Ищем сообщение по itemId и прокручиваем к нему
-          _scrollToMessageByItemId(quotedKey);
-        }
-      },
-    );
-  }
-
-  Future<void> _scrollToMessage(
-    String msgKey, {
-    void Function()? onComplete,
-  }) async {
-    var idx = _displayIndexByKey[msgKey];
-    if (idx == null && msgKey.startsWith('group_')) {
-      final originalKey = msgKey.substring(6);
-      idx = _displayIndexByKey[originalKey];
-    }
-    if (idx == null) return;
-    if (!_itemScrollController.isAttached) return;
-    await _itemScrollController.scrollTo(
-      index: idx,
-      duration: const Duration(milliseconds: 400),
-      curve: Curves.easeInOut,
-      alignment: 0.2,
-    );
-    onComplete?.call();
-  }
-
-  void _scrollToMessageByItemId(int itemId) {
-    final loc = AppLocalizations.of(context);
-    // Ищем сообщение с нужным itemId в _messages
-    final idx = _messages.indexWhere((m) => m.itemId == itemId);
-    if (idx == -1) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(loc.translate('message_not_found'))),
-      );
-      return;
-    }
-    final target = _messages[idx];
-    final displayIdx = _displayIndexByKey[target.key];
-    if (displayIdx == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(loc.translate('message_not_found'))),
-      );
-      return;
-    }
-    if (!_itemScrollController.isAttached) return;
-    _itemScrollController.scrollTo(
-      index: displayIdx,
-      duration: const Duration(milliseconds: 400),
-      curve: Curves.easeInOut,
-      alignment: 0.2,
-    );
-  }
-
-  bool _isMessageVisible(String msgKey, Iterable<ItemPosition> positions) {
-    var idx = _displayIndexByKey[msgKey];
-    if (idx == null && msgKey.startsWith('group_')) {
-      idx = _displayIndexByKey[msgKey.substring(6)];
-    }
-    if (idx == null) return false;
-    for (final p in positions) {
-      if (p.index == idx && p.itemTrailingEdge > 0 && p.itemLeadingEdge < 1) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  bool _shouldShowScrollToBottom(Iterable<ItemPosition> positions) {
-    for (final p in positions) {
-      if (p.index > 5) return true;
-    }
-    return false;
-  }
-
-  Future<void> _scrollToBottom() async {
-    if (!_itemScrollController.isAttached) return;
-    await _itemScrollController.scrollTo(
-      index: 0,
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.easeInOut,
-    );
-  }
-
-  Future<void> _showMessageOptions(
-    BuildContext ctx,
-    Offset tapPosition,
-    UiMessage m,
-    bool isPinned,
-  ) async {
-    final loc = AppLocalizations.of(ctx);
-    final screenH = MediaQuery.of(ctx).size.height;
-    final screenW = MediaQuery.of(ctx).size.width;
-    final menuW = 210.0;
-    final centerX = tapPosition.dx;
-    final items = <PopupMenuEntry<String>>[];
-    if (m.text.isNotEmpty || m.images.isNotEmpty) {
-      items.add(
-        PopupMenuItem<String>(
-          value: 'pin',
-          child: Row(
-            children: [
-              Icon(
-                isPinned ? Icons.push_pin : Icons.push_pin_outlined,
-                size: 20,
-              ),
-              const SizedBox(width: 12),
-              Text(loc.translate(isPinned ? 'message_unpin' : 'message_pin')),
-            ],
-          ),
-        ),
-      );
-    }
-    if (m.text.isNotEmpty) {
-      items.add(
-        PopupMenuItem<String>(
-          value: 'copy',
-          child: Row(
-            children: [
-              const Icon(Icons.copy, size: 20),
-              const SizedBox(width: 12),
-              Text(loc.translate('message_copy')),
-            ],
-          ),
-        ),
-      );
-    }
-    items.add(
-      PopupMenuItem<String>(
-        value: 'reply',
-        child: Row(
-          children: [
-            const Icon(Icons.reply, size: 20),
-            const SizedBox(width: 12),
-            Text(loc.translate('message_reply')),
-          ],
-        ),
-      ),
-    );
-    final menuH = items.length * 48.0 + 8.0;
-    final menuY = tapPosition.dy < screenH / 2
-        ? tapPosition.dy + 8
-        : tapPosition.dy - menuH - 8;
-
-    await showMenu<String>(
-      context: ctx,
-      position: RelativeRect.fromSize(
-        Rect.fromLTWH(
-          (centerX - menuW / 2).clamp(10.0, screenW - menuW),
-          menuY.clamp(10.0, screenH - menuH),
-          menuW,
-          menuH,
-        ),
-        Size(screenW, screenH),
-      ),
-      color: Theme.of(ctx).brightness == Brightness.dark
-          ? const Color(0xFF1E232A)
-          : const Color(0xFFFFFFFF),
-      elevation: 8,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      items: items,
-    ).then((String? value) {
-      if (value == 'pin') {
-        if (isPinned) {
-          _pinStore.unpin(widget.chatRef, m.key);
-        } else {
-          _pinStore.pin(
-            PinnedMessage(
-              chatRef: widget.chatRef,
-              key: m.key,
-              text: m.text,
-              imageFilePath: m.images.isNotEmpty
-                  ? m.images.first.filePath
-                  : null,
-              timeStr: m.timeStr,
-              pinnedAt: DateTime.now(),
-            ),
-          );
-        }
-        setState(() {});
-      } else if (value == 'copy') {
-        Clipboard.setData(ClipboardData(text: m.text));
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(loc.translate('message_copied'))),
-          );
-        }
-      } else if (value == 'reply') {
-        if (m.itemId == null) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(loc.translate('reply_unavailable'))),
-          );
-          return;
-        }
-        setState(() => _replyTo = m);
-      }
-    });
-  }
-
-  Future<void> _autoReceiveImages(List<UiMessage> parsed) async {
-    if (_filesDir == null) return;
-    final service = ref.read(tanglexServiceProvider);
-    bool anyAccepted = false;
-    for (final m in parsed) {
-      for (final img in m.images) {
-        final fileId = img.fileId;
-        if (fileId == null) continue;
-        if (_autoRequestedFiles.contains(fileId)) continue;
-        if (img.hasFullImage) continue;
-        if (m.fromMe) continue;
-        if (img.fileStatusType != 'rcvInvitation') continue;
-        if (img.fileSize != null && img.fileSize! > maxAutoReceiveImageSize)
-          continue;
-        _autoRequestedFiles.add(fileId);
-        await Future<void>.delayed(const Duration(milliseconds: 300));
-        final ok = await service.receiveFile(
-          fileId,
-          approvedRelays: true,
-          encrypt: false,
-          filePath: _filesDir,
-        );
-        if (ok) anyAccepted = true;
-      }
-    }
-    if (anyAccepted && mounted) await _loadMessages();
-  }
-
-  Future<void> _requestFullImage(UiImage image) async {
-    if (image.fileId == null) return;
-    if (image.fileStatusType != 'rcvInvitation') return;
-    final service = ref.read(tanglexServiceProvider);
-    try {
-      await Future<void>.delayed(const Duration(milliseconds: 300));
-      final ok = await service.receiveFile(
-        image.fileId!,
-        approvedRelays: true,
-        encrypt: false,
-        filePath: _filesDir,
-      );
-      if (ok && mounted) {
-        await _loadMessages();
-      }
-    } catch (e) {
-      debugPrint('Error requesting file: $e');
-      if (mounted) {
-        final loc = AppLocalizations.of(context);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(loc.translate('file_load_error'))),
-        );
-      }
-    }
-  }
-
-  @override
-  void dispose() {
-    _msgController.dispose();
-    _audioStateSub?.cancel();
-    _eventSub?.cancel();
-    _refreshDebounce?.cancel();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final loc = AppLocalizations.of(context);
-    final theme = Theme.of(context);
-    final displayEntries = _displayEntries;
-
-    final chatBackground = const Color(0xFF000000);
-    final headerBg = const Color(0xFF111111);
-    final inputBg = const Color(0xFF111111);
-    final textPrimary = const Color(0xFFE8E8E8);
-    final textSecondary = const Color(0xFF808080);
-
-    return Scaffold(
-      backgroundColor: chatBackground,
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        surfaceTintColor: Colors.transparent,
-        scrolledUnderElevation: 0,
-        elevation: 0,
-        flexibleSpace: ClipRect(
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-            child: Container(color: headerBg.withOpacity(0.85)),
-          ),
-        ),
-        leading: IconButton(
-          icon: Icon(Icons.arrow_back, color: textPrimary),
-          onPressed: () => Navigator.of(context).pop(),
-        ),
-        titleSpacing: 0,
-        title: _ChatHeader(
-          title: widget.chatName,
-          chatType: widget.chatType,
-          avatarImage: widget.avatarImage,
-          textPrimary: textPrimary,
-          textSecondary: textSecondary,
-        ),
-      ),
-      body: SelectionArea(
-        child: Column(
-          children: [
-            if (_audioNowPlaying != null)
-              AudioMiniPlayer(
-                player: _audioPlayer,
-                title: _audioNowPlaying!.title,
-                onClose: _stopAudio,
-              ),
-            Expanded(
-              child: _loading
-                  ? const Center(child: CircularProgressIndicator())
-                  : _messages.isEmpty
-                  ? Center(
-                      child: Text(
-                        loc.translate('no_messages_yet'),
-                        style: TextStyle(color: textSecondary),
-                      ),
-                    )
-                  : Column(
-                      children: [
-                        if (_pinStore.getPinCount(widget.chatRef) > 0)
-                          ValueListenableBuilder<Iterable<ItemPosition>>(
-                            valueListenable:
-                                _itemPositionsListener.itemPositions,
-                            builder: (context, positions, _) {
-                              return PinnedBar(
-                                pinned: _pinStore
-                                    .getPinned(widget.chatRef)
-                                    .reversed
-                                    .toList(),
-                                onPinTap: (pm, {onComplete}) =>
-                                    _scrollToMessage(
-                                      pm.key,
-                                      onComplete: onComplete,
-                                    ),
-                                onUnpin: (pm) {
-                                  _pinStore.unpin(widget.chatRef, pm.key);
-                                  setState(() {});
-                                },
-                                isPinVisible: (pm) =>
-                                    _isMessageVisible(pm.key, positions),
-                              );
-                            },
-                          ),
-                        Expanded(
-                          child: ValueListenableBuilder<Iterable<ItemPosition>>(
-                            valueListenable:
-                                _itemPositionsListener.itemPositions,
-                            builder: (context, positions, child) {
-                              return Stack(
-                                children: [
-                                  ScrollablePositionedList.builder(
-                                    itemScrollController: _itemScrollController,
-                                    itemPositionsListener:
-                                        _itemPositionsListener,
-                                    reverse: true,
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 8,
-                                      vertical: 8,
-                                    ),
-                                    itemCount: displayEntries.length,
-                                    itemBuilder: (context, index) {
-                                      final entry = displayEntries[index];
-                                      switch (entry.type) {
-                                        case _DisplayEntryType.date:
-                                          return DateDivider(date: entry.date!);
-                                        case _DisplayEntryType.system:
-                                          return SystemBubble(
-                                            text: entry.message!.text,
-                                          );
-                                        case _DisplayEntryType.group:
-                                        case _DisplayEntryType.message:
-                                          return _buildMessageBubble(
-                                            entry.message!,
-                                          );
-                                      }
-                                    },
-                                  ),
-                                  if (_shouldShowScrollToBottom(positions))
-                                    Positioned(
-                                      right: 12,
-                                      bottom: 12,
-                                      child: FloatingActionButton(
-                                        mini: true,
-                                        backgroundColor: const Color(
-                                          0xFF2A2D32,
-                                        ),
-                                        elevation: 4,
-                                        onPressed: _scrollToBottom,
-                                        child: const Icon(
-                                          Icons.arrow_downward,
-                                          size: 20,
-                                          color: Color(0xFF808080),
-                                        ),
-                                      ),
-                                    ),
-                                ],
-                              );
-                            },
-                          ),
-                        ),
-                      ],
-                    ),
-            ),
-            SafeArea(
-              child: Container(
-                padding: const EdgeInsets.fromLTRB(8, 6, 8, 8),
-                decoration: BoxDecoration(
-                  color: inputBg,
-                  border: const Border(
-                    top: BorderSide(color: Color(0xFF333333)),
-                  ),
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (widget.chatType == 'contact' && !_messagingReady)
-                      Material(
-                        color: const Color(0xFF152535),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 10,
-                          ),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Padding(
-                                padding: EdgeInsets.only(top: 1),
-                                child: Icon(
-                                  Icons.hourglass_top_rounded,
-                                  color: Color(0xFF5A9CF5),
-                                  size: 22,
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Text(
-                                  loc.translate('chat_wait_send'),
-                                  style: const TextStyle(
-                                    color: Color(0xFFB8C5D9),
-                                    fontSize: 13.5,
-                                    height: 1.35,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    if (_replyTo != null)
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: IntrinsicWidth(
-                          child: Container(
-                            margin: const EdgeInsets.only(bottom: 6),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF303030),
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(
-                                color: const Color(0xFF3A3A3A),
-                                width: 1,
-                              ),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Container(
-                                  width: 3,
-                                  height: 24,
-                                  margin: const EdgeInsets.only(
-                                    left: 8,
-                                    right: 8,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xFF5A9CF5),
-                                    borderRadius: BorderRadius.circular(2),
-                                  ),
-                                ),
-                                Flexible(
-                                  child: Padding(
-                                    padding: const EdgeInsets.fromLTRB(
-                                      0,
-                                      6,
-                                      8,
-                                      6,
-                                    ),
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Text(
-                                          _replyTo!.fromMe
-                                              ? AppLocalizations.of(context)
-                                                    .translate('you_label')
-                                              : widget.chatName,
-                                          style: const TextStyle(
-                                            fontSize: 12,
-                                            fontWeight: FontWeight.w600,
-                                            color: Color(0xFF5A9CF5),
-                                          ),
-                                        ),
-                                        const SizedBox(height: 2),
-                                        Text(
-                                          _replyTo!.text.split('\n').first,
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: TextStyle(
-                                            color: textPrimary,
-                                            fontSize: 13,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                                IconButton(
-                                  onPressed: () =>
-                                      setState(() => _replyTo = null),
-                                  icon: Icon(
-                                    Icons.close,
-                                    size: 16,
-                                    color: textSecondary,
-                                  ),
-                                  padding: const EdgeInsets.all(4),
-                                  constraints: const BoxConstraints(),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        IconButton(
-                          onPressed: (_sendingMedia || !_canCompose)
-                              ? null
-                              : _openAttachMenu,
-                          icon: Icon(Icons.attach_file, color: textSecondary),
-                        ),
-                        Expanded(
-                          child: ConstrainedBox(
-                            constraints: const BoxConstraints(maxHeight: 120),
-                            child: TextField(
-                              controller: _msgController,
-                              readOnly: !_canCompose,
-                              style: TextStyle(color: textPrimary),
-                              decoration: InputDecoration(
-                                hintText: _canCompose
-                                    ? loc.translate('message_hint')
-                                    : loc.translate(
-                                        'message_hint_wait_connection',
-                                      ),
-                                hintStyle: const TextStyle(
-                                  color: Color(0xFF606060),
-                                ),
-                                filled: false,
-                                border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(18),
-                                  borderSide: BorderSide.none,
-                                ),
-                                contentPadding: const EdgeInsets.symmetric(
-                                  horizontal: 14,
-                                  vertical: 10,
-                                ),
-                              ),
-                              maxLines: 4,
-                              minLines: 1,
-                              textCapitalization: TextCapitalization.sentences,
-                              onSubmitted: (_) => _sendMessage(),
-                            ),
-                          ),
-                        ),
-                        ValueListenableBuilder(
-                          valueListenable: _msgController,
-                          builder: (context, value, child) {
-                            final hasText = value.text.trim().isNotEmpty;
-                            if (hasText) {
-                              return IconButton(
-                                onPressed: (_sending || !_canCompose)
-                                    ? null
-                                    : _sendMessage,
-                                icon: _sending
-                                    ? const SizedBox(
-                                        width: 20,
-                                        height: 20,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                        ),
-                                      )
-                                    : Icon(
-                                        Icons.send,
-                                        color: theme.colorScheme.primary,
-                                      ),
-                              );
-                            }
-                            return IconButton(
-                              onPressed: (_sendingMedia || !_canCompose)
-                                  ? null
-                                  : _openStickerPicker,
-                              icon: Icon(
-                                Icons.emoji_emotions_outlined,
-                                color: textSecondary,
-                              ),
-                            );
-                          },
-                        ),
-                        ValueListenableBuilder(
-                          valueListenable: _msgController,
-                          builder: (context, value, child) {
-                            final hasText = value.text.trim().isNotEmpty;
-                            if (hasText) {
-                              return const SizedBox.shrink();
-                            }
-                            return Center(
-                              child: GestureDetector(
-                                onTap: () =>
-                                    setState(() => _circleMode = !_circleMode),
-                                onLongPress: _sendingMedia ||
-                                        !_circleMode ||
-                                        !_canCompose
-                                    ? null
-                                    : _openCircleRecorder,
-                                child: Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 8,
-                                    vertical: 12,
-                                  ),
-                                  child: Icon(
-                                    _circleMode
-                                        ? Icons.radio_button_checked
-                                        : Icons.mic_none,
-                                    color: textSecondary,
-                                    size: 24,
-                                  ),
-                                ),
-                              ),
-                            );
-                          },
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   Future<PreviewPayload> _generateVideoThumb(String path) async {
     try {
       final data = await vthumb.VideoThumbnail.thumbnailData(
         video: path,
         imageFormat: vthumb.ImageFormat.JPEG,
-        maxWidth: 320,
-        quality: 70,
+        maxWidth: 480,
+        quality: 75,
       );
-      if (data == null || data.isEmpty) {
-        return PreviewPayload(bytes: Uint8List(0), mime: 'image/jpeg');
+      if (data != null) {
+        return compressPreview(
+          PreviewPayload(bytes: data, mime: 'image/jpeg'),
+          maxBytes: 45000,
+        );
       }
-      return PreviewPayload(bytes: data, mime: 'image/jpeg');
-    } catch (_) {
-      return PreviewPayload(bytes: Uint8List(0), mime: 'image/jpeg');
-    }
+    } catch (_) {}
+    return PreviewPayload(bytes: Uint8List(0), mime: 'image/jpeg');
   }
 
   Future<int> _getVideoDuration(String path) async {
-    // FIX: ранее при исключении в initialize() controller не disposed →
-    // утечка нативного MediaPlayer-хэндла (на каждый pickVideo).
     final controller = VideoPlayerController.file(File(path));
     try {
       await controller.initialize();
@@ -1801,32 +685,1328 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     }
   }
 
+  Future<void> _openCircleRecorder() async {
+    if (_sendingMedia) return;
+    final loc = AppLocalizations.of(context);
+    final result = await Navigator.of(context).push<CircleVideoResult>(
+      MaterialPageRoute(
+        builder: (_) => const CircleRecorderScreen(),
+        fullscreenDialog: true,
+      ),
+    );
+    if (result == null) return;
+    if (!mounted) return;
+    setState(() => _sendingMedia = true);
+    final service = ref.read(tanglexServiceProvider);
+    final res = await service.sendVideo(
+      chatRef: widget.chatRef,
+      filePath: result.filePath,
+      previewBytes: result.previewBytes,
+      durationSec: result.durationSec,
+      isCircle: true,
+      quotedItemId: _replyTo?.itemId,
+    );
+    if (!mounted) return;
+    if (res.ok) {
+      await _loadMessages();
+    } else {
+      _snack(
+        res.error == null
+            ? loc.translate('failed_send_circle')
+            : loc
+                .translate('failed_send_error')
+                .replaceAll('%s', res.error ?? ''),
+      );
+    }
+    if (!mounted) return;
+    setState(() {
+      _sendingMedia = false;
+      if (res.ok) _replyTo = null;
+    });
+  }
+
+  Future<void> _sendSticker(StickerPack pack, StickerItem sticker) async {
+    if (_sendingMedia) return;
+    if (!mounted) return;
+    setState(() => _sendingMedia = true);
+    final service = ref.read(tanglexServiceProvider);
+    final preview = await _generateStickerPreview(sticker.filePath);
+    final res = await service.sendSticker(
+      chatRef: widget.chatRef,
+      filePath: sticker.filePath,
+      previewBytes: preview.bytes,
+      previewMime: preview.mime,
+      packId: pack.id,
+      stickerId: sticker.id,
+    );
+    if (!mounted) return;
+    if (res.ok) {
+      await _loadMessages();
+    } else {
+      final loc = AppLocalizations.of(context);
+      _snack(
+        res.error == null
+            ? loc.translate('failed_send_sticker')
+            : 'Send failed: ${res.error}',
+      );
+    }
+    if (!mounted) return;
+    setState(() => _sendingMedia = false);
+  }
+
   Future<PreviewPayload> _generateStickerPreview(String path) async {
     try {
       final bytes = await File(path).readAsBytes();
-      final preview = prepareStickerPreview(bytes);
-      return compressPreview(preview, maxBytes: 45000);
+      final prepared = prepareStickerPreview(bytes);
+      return compressPreview(prepared, maxBytes: 45000);
     } catch (_) {
-      return PreviewPayload(bytes: Uint8List(0), mime: 'image/jpeg');
+      return PreviewPayload(bytes: Uint8List(0), mime: 'image/webp');
     }
+  }
+
+  // =========================================================================
+  // MEDIA / AUDIO HANDLERS
+  // =========================================================================
+
+  Future<void> _playAudio(AudioItem audio) async {
+    final path = audio.filePath;
+    if (path == null) return;
+    if (!File(path).existsSync()) {
+      if (mounted) {
+        _snack(AppLocalizations.of(context).translate('audio_unavailable'));
+      }
+      return;
+    }
+    try {
+      final isSame = _audioNowPlaying?.filePath == path;
+      if (isSame) {
+        if (_audioPlayer.playing) {
+          await _audioPlayer.pause();
+        } else {
+          await _audioPlayer.play();
+        }
+        if (mounted) {
+          setState(() {
+            _audioNowPlaying = AudioNowPlaying(
+              filePath: path,
+              title: audio.title,
+            );
+          });
+        }
+        return;
+      }
+      try {
+        await _audioPlayer.stop();
+      } catch (_) {}
+      await _audioPlayer.setFilePath(path);
+      if (mounted) {
+        setState(() {
+          _audioNowPlaying = AudioNowPlaying(
+            filePath: path,
+            title: audio.title,
+          );
+        });
+      }
+      await _audioPlayer.play();
+    } catch (e) {
+      debugPrint('chat: audio play error: $e');
+      if (mounted) {
+        _snack(AppLocalizations.of(context).translate('audio_unavailable'));
+      }
+    }
+  }
+
+  Future<void> _requestAudioFile(AudioItem audio) async {
+    if (audio.fileId == null) return;
+    final service = ref.read(tanglexServiceProvider);
+    try {
+      await service.receiveFile(
+        audio.fileId!,
+        approvedRelays: true,
+        encrypt: false,
+        filePath: _cachedFilesDir,
+      );
+      await _loadMessages();
+    } catch (e) {
+      debugPrint('chat: receive audio file error: $e');
+    }
+  }
+
+  Future<void> _requestFile(UiMessage m) async {
+    if (m.fileId == null) return;
+    final service = ref.read(tanglexServiceProvider);
+    try {
+      final ok = await service.receiveFile(
+        m.fileId!,
+        approvedRelays: true,
+        encrypt: false,
+        filePath: _cachedFilesDir,
+      );
+      if (ok && mounted) await _loadMessages();
+    } catch (e) {
+      debugPrint('chat: receive file error: $e');
+      if (mounted) {
+        _snack(AppLocalizations.of(context).translate('file_load_error'));
+      }
+    }
+  }
+
+  Future<void> _requestImage(UiImage img) async {
+    if (img.fileId == null) return;
+    final service = ref.read(tanglexServiceProvider);
+    try {
+      final ok = await service.receiveFile(
+        img.fileId!,
+        approvedRelays: true,
+        encrypt: false,
+        filePath: _cachedFilesDir,
+      );
+      if (ok && mounted) await _loadMessages();
+    } catch (e) {
+      debugPrint('chat: receive image error: $e');
+    }
+  }
+
+  void _openMedia(List<UiImage> images, int index) {
+    final img = images[index];
+    if (img.isVideo && !img.isCircle) {
+      if (img.filePath == null) {
+        _snack(AppLocalizations.of(context).translate('file_not_loaded'));
+        return;
+      }
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => VideoPlayerScreen(filePath: img.filePath!),
+          fullscreenDialog: true,
+        ),
+      );
+      return;
+    }
+    if (!img.isVideo && !img.isCircle && img.filePath != null) {
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => GalleryView(
+            images: images,
+            initial: index,
+          ),
+          fullscreenDialog: true,
+        ),
+      );
+    }
+  }
+
+  // =========================================================================
+  // CONTEXT MENU / REPLY / PIN
+  // =========================================================================
+
+  Future<void> _showMessageOptions(
+    BuildContext ctx,
+    Offset pos,
+    UiMessage m,
+    bool isPinned,
+  ) async {
+    final loc = AppLocalizations.of(ctx);
+    final size = MediaQuery.of(ctx).size;
+    final entries = <PopupMenuEntry<String>>[
+      if (m.text.isNotEmpty || m.images.isNotEmpty)
+        PopupMenuItem<String>(
+          value: 'pin',
+          child: _menuItem(
+            icon: isPinned ? Icons.push_pin : Icons.push_pin_outlined,
+            label: loc.translate(isPinned ? 'message_unpin' : 'message_pin'),
+          ),
+        ),
+      if (m.text.isNotEmpty)
+        PopupMenuItem<String>(
+          value: 'copy',
+          child: _menuItem(
+            icon: Icons.copy,
+            label: loc.translate('message_copy'),
+          ),
+        ),
+      PopupMenuItem<String>(
+        value: 'reply',
+        child: _menuItem(
+          icon: Icons.reply,
+          label: loc.translate('message_reply'),
+        ),
+      ),
+    ];
+    const menuW = 220.0;
+    final menuH = entries.length * 48.0 + 12.0;
+    final menuX = (pos.dx - menuW / 2).clamp(10.0, size.width - menuW - 10.0);
+    final menuY = pos.dy < size.height / 2
+        ? pos.dy + 8
+        : (pos.dy - menuH - 8).clamp(40.0, size.height - menuH - 40.0);
+
+    final selected = await showMenu<String>(
+      context: ctx,
+      position: RelativeRect.fromSize(
+        Rect.fromLTWH(menuX, menuY, menuW, menuH),
+        size,
+      ),
+      color: const Color(0xFF1E232A),
+      elevation: 8,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      items: entries,
+    );
+    if (!mounted || selected == null) return;
+    switch (selected) {
+      case 'pin':
+        if (isPinned) {
+          await _pinStore.unpin(widget.chatRef, m.key);
+        } else {
+          await _pinStore.pin(
+            PinnedMessage(
+              chatRef: widget.chatRef,
+              key: m.key,
+              text: m.text,
+              imageFilePath:
+                  m.images.isNotEmpty ? m.images.first.filePath : null,
+              timeStr: m.timeStr,
+              pinnedAt: DateTime.now(),
+            ),
+          );
+        }
+        if (mounted) setState(() {});
+        break;
+      case 'copy':
+        await Clipboard.setData(ClipboardData(text: m.text));
+        if (mounted) _snack(loc.translate('message_copied'));
+        break;
+      case 'reply':
+        _setReply(m);
+        break;
+    }
+  }
+
+  Widget _menuItem({required IconData icon, required String label}) {
+    return Row(
+      children: [
+        Icon(icon, size: 20, color: _ChatTheme.textPrimary),
+        const SizedBox(width: 12),
+        Text(label, style: const TextStyle(color: _ChatTheme.textPrimary)),
+      ],
+    );
+  }
+
+  void _setReply(UiMessage m) {
+    if (m.itemId == null) {
+      _snack(AppLocalizations.of(context).translate('reply_unavailable'));
+      return;
+    }
+    setState(() => _replyTo = m);
+    _msgFocus.requestFocus();
+  }
+
+  // =========================================================================
+  // DISPLAY ENTRIES (date separators + messages)
+  // =========================================================================
+
+  List<_DisplayEntry> _buildDisplayEntries(List<UiMessage> msgs) {
+    // msgs are sorted newest-first; reverse list rendering keeps that order.
+    final out = <_DisplayEntry>[];
+    String? lastDate;
+    for (final m in msgs) {
+      out.add(_DisplayEntry.message(m));
+      final d = m.time;
+      if (d != null) {
+        final key = '${d.year}-${d.month}-${d.day}';
+        if (lastDate != key) {
+          out.add(_DisplayEntry.date(d));
+          lastDate = key;
+        }
+      }
+    }
+    return out;
+  }
+
+  // =========================================================================
+  // BUILD
+  // =========================================================================
+
+  @override
+  Widget build(BuildContext context) {
+    final loc = AppLocalizations.of(context);
+    return Scaffold(
+      backgroundColor: _ChatTheme.bg,
+      resizeToAvoidBottomInset: true,
+      appBar: _buildAppBar(loc),
+      body: Column(
+        children: [
+          Expanded(child: _buildBody(loc)),
+          if (_replyTo != null) _buildReplyPreview(loc),
+          _buildComposeBar(loc),
+        ],
+      ),
+    );
+  }
+
+  PreferredSizeWidget _buildAppBar(AppLocalizations loc) {
+    return AppBar(
+      backgroundColor: _ChatTheme.appBarBg,
+      elevation: 0,
+      titleSpacing: 0,
+      iconTheme: const IconThemeData(color: _ChatTheme.textPrimary),
+      title: Row(
+        children: [
+          _Avatar(name: widget.chatName, image: widget.avatarImage, size: 36),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  widget.chatName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: _ChatTheme.textPrimary,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: -0.2,
+                  ),
+                ),
+                Text(
+                  _subtitleText(loc),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: _ChatTheme.textSecondary,
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        IconButton(
+          icon: const Icon(Icons.more_vert),
+          onPressed: () => _openChatMenu(loc),
+          tooltip: 'More',
+        ),
+      ],
+    );
+  }
+
+  String _subtitleText(AppLocalizations loc) {
+    if (widget.chatType == 'group') return loc.translate('chat_type_group');
+    if (widget.chatType == 'contact') {
+      return _messagingReady
+          ? loc.translate('chat_type_contact')
+          : loc.translate('connecting_secure');
+    }
+    return loc.translate('chat_type_chat');
+  }
+
+  void _openChatMenu(AppLocalizations loc) {
+    final pinned = _pinStore.getPinned(widget.chatRef);
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: _ChatTheme.appBarBg,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (pinned.isNotEmpty)
+              ListTile(
+                leading: const Icon(Icons.push_pin, color: _ChatTheme.accent),
+                title: Text(
+                  '${loc.translate('message_pin')} (${pinned.length})',
+                  style: const TextStyle(color: _ChatTheme.textPrimary),
+                ),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  _showPinnedList(loc, pinned);
+                },
+              ),
+            ListTile(
+              leading: const Icon(
+                Icons.refresh,
+                color: _ChatTheme.textSecondary,
+              ),
+              title: Text(
+                loc.translate('refresh'),
+                style: const TextStyle(color: _ChatTheme.textPrimary),
+              ),
+              onTap: () {
+                Navigator.of(ctx).pop();
+                _loadMessages();
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showPinnedList(AppLocalizations loc, List<PinnedMessage> pinned) {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: _ChatTheme.appBarBg,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (ctx) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.5,
+        maxChildSize: 0.9,
+        builder: (_, scrollCtrl) => ListView.separated(
+          controller: scrollCtrl,
+          itemCount: pinned.length,
+          separatorBuilder: (_, __) =>
+              const Divider(color: _ChatTheme.divider, height: 1),
+          itemBuilder: (_, i) {
+            final p = pinned[i];
+            return ListTile(
+              leading: const Icon(
+                Icons.push_pin,
+                color: _ChatTheme.accent,
+                size: 20,
+              ),
+              title: Text(
+                p.text.isEmpty ? '(media)' : p.text,
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: _ChatTheme.textPrimary),
+              ),
+              subtitle: Text(
+                p.timeStr,
+                style: const TextStyle(color: _ChatTheme.textSecondary),
+              ),
+              trailing: IconButton(
+                icon: const Icon(Icons.close, color: _ChatTheme.textSecondary),
+                onPressed: () async {
+                  await _pinStore.unpin(widget.chatRef, p.key);
+                  if (mounted) {
+                    Navigator.of(ctx).pop();
+                    setState(() {});
+                  }
+                },
+              ),
+              onTap: () {
+                Navigator.of(ctx).pop();
+                _scrollToKey(p.key);
+              },
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  void _scrollToKey(String key) {
+    final idx = _displayIndexByKey[key];
+    if (idx == null || !_scrollController.isAttached) return;
+    _scrollController.scrollTo(
+      index: idx,
+      duration: const Duration(milliseconds: 350),
+      curve: Curves.easeInOutCubic,
+      alignment: 0.2,
+    );
+  }
+
+  void _scrollToItemId(int itemId) {
+    final idx = _messages.indexWhere((m) => m.itemId == itemId);
+    if (idx < 0) {
+      _snack(AppLocalizations.of(context).translate('message_not_found'));
+      return;
+    }
+    _scrollToKey(_messages[idx].key);
+  }
+
+  Widget _buildBody(AppLocalizations loc) {
+    if (_loadingInitial) {
+      return const Center(
+        child: CircularProgressIndicator(color: _ChatTheme.accent),
+      );
+    }
+    if (_displayEntries.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Text(
+            loc.translate('no_messages_yet'),
+            style: const TextStyle(color: _ChatTheme.textSecondary),
+            textAlign: TextAlign.center,
+          ),
+        ),
+      );
+    }
+    return Stack(
+      children: [
+        ScrollablePositionedList.builder(
+          reverse: true,
+          itemCount: _displayEntries.length,
+          itemScrollController: _scrollController,
+          itemPositionsListener: _positionsListener,
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          itemBuilder: (context, index) => _buildEntry(_displayEntries[index]),
+        ),
+        if (_showJumpToBottom)
+          Positioned(
+            right: 12,
+            bottom: 12,
+            child: _JumpToBottomButton(
+              onTap: () {
+                if (_scrollController.isAttached) {
+                  _scrollController.scrollTo(
+                    index: 0,
+                    duration: const Duration(milliseconds: 250),
+                    curve: Curves.easeOutCubic,
+                  );
+                }
+              },
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildEntry(_DisplayEntry e) {
+    if (e.kind == _DisplayKind.date && e.date != null) {
+      return _DateChip(date: e.date!);
+    }
+    final m = e.message!;
+    if (m.isSystem) {
+      return _SystemBanner(text: m.text);
+    }
+    final isPinned = _pinStore.isPinned(widget.chatRef, m.key);
+    return MessageBubble(
+      key: ValueKey(m.key),
+      message: m,
+      isPinned: isPinned,
+      audioPlayer: _audioPlayer,
+      nowPlaying: _audioNowPlaying,
+      onDownloadImage: _requestImage,
+      onOpenMedia: _openMedia,
+      onPlayAudio: _playAudio,
+      onDownloadAudio: _requestAudioFile,
+      onDownloadFile: _requestFile,
+      onLongPress: (details, ctx) =>
+          _showMessageOptions(ctx, details.globalPosition, m, isPinned),
+      onSwipeReply: () => _setReply(m),
+      onQuotedTap: () {
+        final id = m.quoted?.itemId;
+        if (id != null) _scrollToItemId(id);
+      },
+    );
+  }
+
+  // =========================================================================
+  // REPLY PREVIEW
+  // =========================================================================
+
+  Widget _buildReplyPreview(AppLocalizations loc) {
+    final m = _replyTo!;
+    return Container(
+      color: _ChatTheme.composeBg,
+      padding: const EdgeInsets.fromLTRB(12, 6, 6, 6),
+      child: Row(
+        children: [
+          Container(width: 3, height: 36, color: _ChatTheme.quotedBar),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  m.fromMe ? loc.translate('you_label') : widget.chatName,
+                  style: const TextStyle(
+                    color: _ChatTheme.accent,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                Text(
+                  m.text.isEmpty ? '(media)' : m.text.split('\n').first,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: _ChatTheme.textSecondary,
+                    fontSize: 13,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.close, color: _ChatTheme.textSecondary),
+            onPressed: () => setState(() => _replyTo = null),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // =========================================================================
+  // COMPOSE BAR
+  // =========================================================================
+
+  Widget _buildComposeBar(AppLocalizations loc) {
+    final canSend = _canCompose && !_sending;
+    return Container(
+      color: _ChatTheme.composeBg,
+      padding: EdgeInsets.only(
+        left: 6,
+        right: 6,
+        top: 6,
+        bottom: MediaQuery.of(context).padding.bottom + 6,
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          _ComposeIconButton(
+            icon: Icons.add,
+            onTap: canSend ? _openAttachMenu : null,
+            tooltip: 'Attach',
+          ),
+          Expanded(
+            child: Container(
+              constraints: const BoxConstraints(minHeight: 40),
+              margin: const EdgeInsets.symmetric(horizontal: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              decoration: BoxDecoration(
+                color: const Color(0xFF202126),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _msgController,
+                      focusNode: _msgFocus,
+                      enabled: canSend,
+                      minLines: 1,
+                      maxLines: 6,
+                      textCapitalization: TextCapitalization.sentences,
+                      style: const TextStyle(
+                        color: _ChatTheme.textPrimary,
+                        fontSize: 15,
+                      ),
+                      cursorColor: _ChatTheme.accent,
+                      decoration: InputDecoration(
+                        border: InputBorder.none,
+                        isDense: true,
+                        contentPadding: const EdgeInsets.symmetric(
+                          vertical: 10,
+                        ),
+                        hintText: _canCompose
+                            ? loc.translate('message_hint')
+                            : loc.translate('message_hint_wait_connection'),
+                        hintStyle: const TextStyle(
+                          color: _ChatTheme.textSecondary,
+                          fontSize: 14,
+                        ),
+                      ),
+                      onSubmitted: (_) => _sendText(),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(
+                      Icons.emoji_emotions_outlined,
+                      color: _ChatTheme.textSecondary,
+                    ),
+                    onPressed: canSend ? _openStickerSheet : null,
+                    splashRadius: 18,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          _ComposeSendButton(
+            hasText: _composeHasText,
+            sending: _sending || _sendingMedia,
+            enabled: canSend,
+            onSendText: _sendText,
+            onCircle: _openCircleRecorder,
+          ),
+        ],
+      ),
+    );
+  }
+
+  // =========================================================================
+  // ATTACH SHEET
+  // =========================================================================
+
+  void _openAttachMenu() {
+    final loc = AppLocalizations.of(context);
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: _ChatTheme.appBarBg,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: GridView.count(
+          shrinkWrap: true,
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+          crossAxisCount: 4,
+          mainAxisSpacing: 12,
+          crossAxisSpacing: 12,
+          children: [
+            _AttachTile(
+              icon: Icons.photo_outlined,
+              label: loc.translate('photo'),
+              color: const Color(0xFF5A9CF5),
+              onTap: () {
+                Navigator.of(ctx).pop();
+                _sendImages();
+              },
+            ),
+            _AttachTile(
+              icon: Icons.videocam_outlined,
+              label: loc.translate('video'),
+              color: const Color(0xFFE07A5F),
+              onTap: () {
+                Navigator.of(ctx).pop();
+                _pickAndSendVideo();
+              },
+            ),
+            _AttachTile(
+              icon: Icons.audiotrack,
+              label: loc.translate('audio'),
+              color: const Color(0xFF81B29A),
+              onTap: () {
+                Navigator.of(ctx).pop();
+                _pickAndSendFile(audioOnly: true);
+              },
+            ),
+            _AttachTile(
+              icon: Icons.insert_drive_file_outlined,
+              label: loc.translate('file'),
+              color: const Color(0xFFB888E5),
+              onTap: () {
+                Navigator.of(ctx).pop();
+                _pickAndSendFile();
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // =========================================================================
+  // STICKER SHEET
+  // =========================================================================
+
+  void _openStickerSheet() {
+    final loc = AppLocalizations.of(context);
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: _ChatTheme.appBarBg,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) {
+          return DraggableScrollableSheet(
+            expand: false,
+            initialChildSize: 0.5,
+            maxChildSize: 0.9,
+            builder: (_, scrollCtrl) {
+              final packs = _stickerStore.packs;
+              if (packs.isEmpty) {
+                return Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(
+                          Icons.emoji_emotions_outlined,
+                          color: _ChatTheme.textSecondary,
+                          size: 48,
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          loc.translate('sticker_not_installed'),
+                          style: const TextStyle(
+                            color: _ChatTheme.textSecondary,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        TextButton(
+                          onPressed: () async {
+                            final created = await _createStickerPack();
+                            if (created != null) setSheet(() {});
+                          },
+                          child: Text(loc.translate('import')),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }
+              if (_selectedPackIndex >= packs.length) {
+                _selectedPackIndex = 0;
+              }
+              final pack = packs[_selectedPackIndex];
+              return Column(
+                children: [
+                  Expanded(
+                    child: GridView.builder(
+                      controller: scrollCtrl,
+                      padding: const EdgeInsets.all(8),
+                      gridDelegate:
+                          const SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: 4,
+                        mainAxisSpacing: 6,
+                        crossAxisSpacing: 6,
+                      ),
+                      itemCount: pack.stickers.length,
+                      itemBuilder: (_, i) {
+                        final s = pack.stickers[i];
+                        return GestureDetector(
+                          onTap: () {
+                            Navigator.of(ctx).pop();
+                            _sendSticker(pack, s);
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.all(6),
+                            color: Colors.transparent,
+                            child: s.filePath.toLowerCase().endsWith('.webm')
+                                ? StickerThumb(filePath: s.filePath)
+                                : Image.file(File(s.filePath),
+                                    fit: BoxFit.contain),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  Container(
+                    height: 56,
+                    color: _ChatTheme.bg,
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: ListView.builder(
+                            scrollDirection: Axis.horizontal,
+                            itemCount: packs.length,
+                            itemBuilder: (_, i) {
+                              final p = packs[i];
+                              final selected = i == _selectedPackIndex;
+                              return GestureDetector(
+                                onTap: () => setSheet(
+                                  () => _selectedPackIndex = i,
+                                ),
+                                child: Container(
+                                  width: 56,
+                                  padding: const EdgeInsets.all(10),
+                                  decoration: BoxDecoration(
+                                    color: selected
+                                        ? _ChatTheme.accent.withValues(
+                                            alpha: 0.2,
+                                          )
+                                        : Colors.transparent,
+                                  ),
+                                  child: p.coverPath != null
+                                      ? (p.coverPath!
+                                              .toLowerCase()
+                                              .endsWith('.webm')
+                                          ? StickerThumb(
+                                              filePath: p.coverPath!,
+                                            )
+                                          : Image.file(File(p.coverPath!)))
+                                      : const Icon(
+                                          Icons.emoji_emotions_outlined,
+                                          color: _ChatTheme.textSecondary,
+                                        ),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(
+                            Icons.add,
+                            color: _ChatTheme.textSecondary,
+                          ),
+                          onPressed: () async {
+                            final created = await _createStickerPack();
+                            if (created != null) setSheet(() {});
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+
+  Future<StickerPack?> _createStickerPack() async {
+    final loc = AppLocalizations.of(context);
+    final nameCtrl = TextEditingController();
+    final idCtrl = TextEditingController();
+    final authorCtrl = TextEditingController();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: _ChatTheme.appBarBg,
+        title: Text(
+          loc.translate('new_sticker_pack'),
+          style: const TextStyle(color: _ChatTheme.textPrimary),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _stickerField(nameCtrl, loc.translate('sticker_name'), onChanged: (v) {
+              if (idCtrl.text.isEmpty) idCtrl.text = slugify(v);
+            }),
+            _stickerField(idCtrl, loc.translate('sticker_id')),
+            _stickerField(authorCtrl, loc.translate('sticker_author')),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: Text(loc.translate('cancel')),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: Text(loc.translate('sticker_next')),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return null;
+    final name = nameCtrl.text.trim();
+    final id = idCtrl.text.trim();
+    if (name.isEmpty || id.isEmpty) return null;
+    final res = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['webp', 'webm'],
+      allowMultiple: true,
+    );
+    if (res == null || res.files.isEmpty) return null;
+    final paths = res.files.map((e) => e.path).whereType<String>().toList();
+    return _stickerStore.createPack(
+      packId: id,
+      name: name,
+      author: authorCtrl.text.trim().isEmpty ? null : authorCtrl.text.trim(),
+      filePaths: paths,
+    );
+  }
+
+  Widget _stickerField(
+    TextEditingController c,
+    String label, {
+    void Function(String)? onChanged,
+  }) {
+    return TextField(
+      controller: c,
+      onChanged: onChanged,
+      style: const TextStyle(color: _ChatTheme.textPrimary),
+      decoration: InputDecoration(
+        labelText: label,
+        labelStyle: const TextStyle(color: _ChatTheme.textSecondary),
+      ),
+    );
+  }
+
+  // =========================================================================
+  // UTILS
+  // =========================================================================
+
+  void _snack(String text) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(text),
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: const Color(0xFF1E232A),
+      ),
+    );
   }
 }
 
-enum _DisplayEntryType { date, system, message, group }
+// =============================================================================
+// PRIVATE WIDGETS
+// =============================================================================
+
+enum _DisplayKind { message, date }
 
 class _DisplayEntry {
-  final _DisplayEntryType type;
+  final _DisplayKind kind;
   final UiMessage? message;
   final DateTime? date;
 
-  const _DisplayEntry._(this.type, {this.message, this.date});
+  const _DisplayEntry._(this.kind, {this.message, this.date});
 
-  factory _DisplayEntry.date(DateTime date) =>
-      _DisplayEntry._(_DisplayEntryType.date, date: date);
-  factory _DisplayEntry.system(UiMessage message) =>
-      _DisplayEntry._(_DisplayEntryType.system, message: message);
-  factory _DisplayEntry.message(UiMessage message) =>
-      _DisplayEntry._(_DisplayEntryType.message, message: message);
-  factory _DisplayEntry.group(UiMessage message) =>
-      _DisplayEntry._(_DisplayEntryType.group, message: message);
+  factory _DisplayEntry.message(UiMessage m) =>
+      _DisplayEntry._(_DisplayKind.message, message: m);
+
+  factory _DisplayEntry.date(DateTime d) =>
+      _DisplayEntry._(_DisplayKind.date, date: d);
+}
+
+class _Avatar extends StatelessWidget {
+  final String name;
+  final Uint8List? image;
+  final double size;
+
+  const _Avatar({required this.name, required this.image, this.size = 32});
+
+  String _initials() {
+    final parts = name.trim().split(RegExp(r'\s+'));
+    if (parts.isEmpty) return '';
+    if (parts.length == 1) {
+      final runes = parts.first.runes.toList();
+      return String.fromCharCodes(runes.take(2)).toUpperCase();
+    }
+    final a = parts[0].runes.isEmpty
+        ? ''
+        : String.fromCharCodes([parts[0].runes.first]);
+    final b = parts[1].runes.isEmpty
+        ? ''
+        : String.fromCharCodes([parts[1].runes.first]);
+    return (a + b).toUpperCase();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return CircleAvatar(
+      radius: size / 2,
+      backgroundColor: _ChatTheme.avatarBg,
+      backgroundImage: image != null ? MemoryImage(image!) : null,
+      child: image == null
+          ? Text(
+              _initials(),
+              style: TextStyle(
+                color: _ChatTheme.textPrimary,
+                fontWeight: FontWeight.w600,
+                fontSize: size / 2.6,
+              ),
+            )
+          : null,
+    );
+  }
+}
+
+class _DateChip extends StatelessWidget {
+  final DateTime date;
+
+  const _DateChip({required this.date});
+
+  String _label(BuildContext context) {
+    final loc = AppLocalizations.of(context);
+    final now = DateTime.now();
+    final isToday = now.year == date.year &&
+        now.month == date.month &&
+        now.day == date.day;
+    if (isToday) return loc.translate('today');
+    final yest = now.subtract(const Duration(days: 1));
+    if (yest.year == date.year &&
+        yest.month == date.month &&
+        yest.day == date.day) {
+      return loc.translate('yesterday');
+    }
+    final dd = date.day.toString().padLeft(2, '0');
+    final mm = date.month.toString().padLeft(2, '0');
+    return '$dd.$mm.${date.year}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(
+          color: _ChatTheme.dateChip,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Text(
+          _label(context),
+          style: const TextStyle(
+            color: _ChatTheme.textSecondary,
+            fontSize: 12,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SystemBanner extends StatelessWidget {
+  final String text;
+
+  const _SystemBanner({required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: _ChatTheme.dateChip,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Text(
+          text,
+          style: const TextStyle(
+            color: _ChatTheme.textSecondary,
+            fontSize: 12,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _JumpToBottomButton extends StatelessWidget {
+  final VoidCallback onTap;
+
+  const _JumpToBottomButton({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: const Color(0xFF1E232A),
+      shape: const CircleBorder(),
+      elevation: 4,
+      child: InkWell(
+        customBorder: const CircleBorder(),
+        onTap: onTap,
+        child: const SizedBox(
+          width: 44,
+          height: 44,
+          child: Icon(
+            Icons.keyboard_arrow_down,
+            color: _ChatTheme.textPrimary,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ComposeIconButton extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback? onTap;
+  final String? tooltip;
+
+  const _ComposeIconButton({
+    required this.icon,
+    required this.onTap,
+    this.tooltip,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final btn = IconButton(
+      onPressed: onTap,
+      icon: Icon(icon, color: _ChatTheme.textSecondary),
+      splashRadius: 22,
+    );
+    if (tooltip != null) return Tooltip(message: tooltip!, child: btn);
+    return btn;
+  }
+}
+
+class _ComposeSendButton extends StatelessWidget {
+  final bool hasText;
+  final bool sending;
+  final bool enabled;
+  final VoidCallback onSendText;
+  final VoidCallback onCircle;
+
+  const _ComposeSendButton({
+    required this.hasText,
+    required this.sending,
+    required this.enabled,
+    required this.onSendText,
+    required this.onCircle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final disabled = !enabled || sending;
+    final showSend = hasText;
+    final bg = showSend ? _ChatTheme.accent : const Color(0xFF202126);
+    final iconColor = showSend ? Colors.white : _ChatTheme.textSecondary;
+    return Padding(
+      padding: const EdgeInsets.only(left: 4, right: 2),
+      child: Material(
+        color: bg,
+        shape: const CircleBorder(),
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: disabled
+              ? null
+              : (showSend ? onSendText : onCircle),
+          child: SizedBox(
+            width: 44,
+            height: 44,
+            child: sending
+                ? const Padding(
+                    padding: EdgeInsets.all(10),
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                : Icon(
+                    showSend ? Icons.send : Icons.fiber_manual_record,
+                    color: iconColor,
+                  ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AttachTile extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color color;
+  final VoidCallback onTap;
+
+  const _AttachTile({
+    required this.icon,
+    required this.label,
+    required this.color,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(16),
+      onTap: onTap,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 56,
+            height: 56,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.18),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(icon, color: color, size: 28),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            label,
+            style: const TextStyle(
+              color: _ChatTheme.textPrimary,
+              fontSize: 12,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }

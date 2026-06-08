@@ -163,6 +163,8 @@ class AppLocalizations {
     'initializing': 'Инициализация...',
 
     // Chat header & message actions
+    'today': 'Сегодня',
+    'yesterday': 'Вчера',
     'chat_type_group': 'Группа',
     'chat_type_contact': 'Контакт',
     'chat_type_chat': 'Чат',
@@ -324,6 +326,8 @@ class AppLocalizations {
     'initializing': 'Initializing...',
 
     // Chat header & message actions
+    'today': 'Today',
+    'yesterday': 'Yesterday',
     'chat_type_group': 'Group',
     'chat_type_contact': 'Contact',
     'chat_type_chat': 'Chat',

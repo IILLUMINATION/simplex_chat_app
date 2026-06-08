@@ -257,19 +257,7 @@ class VideoCircle extends StatefulWidget {
 
 class _VideoCircleState extends State<VideoCircle> {
   VideoPlayerController? _controller;
-  bool _initRequested = false;
-
-  @override
-  void initState() {
-    super.initState();
-    // FIX: ранее VideoPlayerController создавался для КАЖДОГО кружка в
-    // чате сразу при скролле. Это:
-    //  - открывало MediaCodec на каждое сообщение (VP9 декодер
-    //    потребляет ощутимый GPU/CPU и спамит logcat);
-    //  - забирало AudioFocus у системного плеера, прерывая музыку.
-    // Теперь контроллер инициализируется лениво — только когда
-    // пользователь тапнул по кружку (см. _toggle).
-  }
+  bool _initializing = false;
 
   @override
   void didUpdateWidget(covariant VideoCircle oldWidget) {
@@ -277,30 +265,7 @@ class _VideoCircleState extends State<VideoCircle> {
     if (oldWidget.image.filePath != widget.image.filePath) {
       _controller?.dispose();
       _controller = null;
-      _initRequested = false;
-    }
-  }
-
-  Future<void> _ensureInitialized() async {
-    if (_initRequested) return;
-    _initRequested = true;
-    if (widget.image.filePath == null) return;
-    final controller = VideoPlayerController.file(File(widget.image.filePath!));
-    _controller = controller;
-    try {
-      await controller.initialize();
-      // Кружок «как в телеге» — без звука у получателя по умолчанию
-      // (озвучка в SimpleX доставляется отдельным voice-сообщением).
-      // Тем самым ещё и не прерываем стороннюю музыку.
-      await controller.setVolume(0);
-      if (!mounted) {
-        await controller.dispose();
-        _controller = null;
-        return;
-      }
-      setState(() {});
-    } catch (_) {
-      _controller = null;
+      _initializing = false;
     }
   }
 
@@ -311,24 +276,44 @@ class _VideoCircleState extends State<VideoCircle> {
   }
 
   Future<void> _toggle() async {
-    // Lazy-init: контроллер появляется только после первого тапа.
-    if (_controller == null) {
-      await _ensureInitialized();
-      final fresh = _controller;
-      if (fresh != null && fresh.value.isInitialized) {
-        await fresh.play();
-        if (mounted) setState(() {});
+    // Already playing -> pause.
+    final existing = _controller;
+    if (existing != null && existing.value.isInitialized) {
+      if (existing.value.isPlaying) {
+        await existing.pause();
+      } else {
+        await existing.play();
       }
+      if (mounted) setState(() {});
       return;
     }
-    final ctrl = _controller!;
-    if (!ctrl.value.isInitialized) return;
-    if (ctrl.value.isPlaying) {
-      ctrl.pause();
-    } else {
-      ctrl.play();
+    // Initialization already in flight, ignore additional taps.
+    if (_initializing) return;
+    final path = widget.image.filePath;
+    if (path == null) return;
+    _initializing = true;
+    final controller = VideoPlayerController.file(File(path));
+    try {
+      await controller.initialize();
+      // Без звука: не перебиваем фоновую музыку и оставаемся "хорошим
+      // гражданином" в системе AudioFocus.
+      await controller.setVolume(0);
+      if (!mounted) {
+        await controller.dispose();
+        return;
+      }
+      _controller = controller;
+      _initializing = false;
+      setState(() {});
+      await controller.play();
+      if (mounted) setState(() {});
+    } catch (e) {
+      debugPrint('VideoCircle init error: $e');
+      _initializing = false;
+      try {
+        await controller.dispose();
+      } catch (_) {}
     }
-    setState(() {});
   }
 
   @override

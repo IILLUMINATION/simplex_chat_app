@@ -39,6 +39,7 @@ class MessageBubble extends StatelessWidget {
   final VoidCallback? onQuotedTap;
 
   const MessageBubble({
+    super.key,
     required this.message,
     required this.onDownloadImage,
     required this.onOpenMedia,
