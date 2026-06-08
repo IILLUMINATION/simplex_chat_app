@@ -131,9 +131,4 @@ class CircleVideoResult {
   });
 }
 
-class SendResult {
-  final bool ok;
-  final String? error;
 
-  const SendResult({required this.ok, this.error});
-}
