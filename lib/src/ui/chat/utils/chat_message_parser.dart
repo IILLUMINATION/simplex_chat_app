@@ -229,9 +229,19 @@ UiMessage? parseChatItem(Map<String, dynamic> msg, {String? filesBaseDir}) {
     } else if (msgType == 'unknown') {
       display = text.isNotEmpty ? text : '[Unsupported]';
     }
+    // FIX: для стикеров принудительно очищаем display. Маркер "/sticker"
+    // в исходном msgContent.text — это локальный sentinel, по которому
+    // мы (наш клиент) распознаём стикер. Он не должен показываться
+    // пользователю как обычный текст. Также блокируем fallback на itemText
+    // (он может содержать "/sticker" целиком), иначе текст всё равно
+    // протекает в UI и ломает определение isStickerOnly в message_widgets.
+    final fallbackItemText = isSticker ? '' : (itemText ?? '');
+    if (isSticker) {
+      display = '';
+    }
     return UiMessage(
       key: msgKey,
-      text: display.isNotEmpty ? display : (itemText ?? ''),
+      text: display.isNotEmpty ? display : fallbackItemText,
       fromMe: fromMe,
       timeStr: timeStr,
       status: status,
