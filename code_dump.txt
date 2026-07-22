@@ -3261,9 +3261,11 @@ class ChatPreview {
     final finalType = (embeddedContactRequestId != null && type == 'contact') ? 'contact' : type;
 
     return ChatPreview(
-      chatRef: finalType == 'contactRequest'
-          ? '@c_${id ?? id ?? '?'}'
-          : (finalType == 'group' ? '#${id ?? id ?? '?'}' : '@${id ?? id ?? '?'}'),
+      chatRef: (embeddedContactRequestId != null && type == 'contact')
+          ? '@c_$embeddedContactRequestId'
+          : (finalType == 'contactRequest'
+              ? '@c_${id ?? '?'}'
+              : (finalType == 'group' ? '#${id ?? '?'}' : '@${id ?? '?'}')),
       chatType: finalType,
       displayName: name,
       lastMessage: lastMsg,
