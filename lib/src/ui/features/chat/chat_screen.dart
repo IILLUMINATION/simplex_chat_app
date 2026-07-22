@@ -1,14 +1,12 @@
-// TangleX — single-chat screen.
-//
-// Top app bar with avatar + name, messages list (newest at bottom), compose
-// bar pinned to the bottom of the safe area. Per HANDOFF.md § 10, this widget
-// is kept thin (<200 lines); state lives in `ChatController`.
+// TangleX — Telegram Style Chat Screen
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
 
 import '../../../localization/app_localizations.dart';
 import '../../../providers/persistent_store.dart';
+import '../../core/theme/tx_theme.dart';
 import '../../shared/avatar.dart';
 import '../../shared/empty_state.dart';
 import 'chat_controller.dart';
@@ -50,28 +48,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     });
   }
 
-  String? _translateSendError(BuildContext context, String? code) {
-    if (code == null) return null;
-    final t = AppLocalizations.of(context);
-    switch (code) {
-      case 'contactNotReady':
-        return t.translate('send_error_contact_not_ready');
-      case 'contactNotActive':
-        return t.translate('send_error_contact_not_active');
-      case 'noResponse':
-        return t.translate('send_error_no_response');
-      case 'parseError':
-        return t.translate('send_error_parse');
-      default:
-        return code;
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final tt = Theme.of(context).textTheme;
-    final t = AppLocalizations.of(context);
+    final theme = context.txTheme;
+
     final args = ChatArgs(
       chatRef: widget.chat.chatRef,
       isContact: widget.chat.chatType == 'contact',
@@ -79,27 +61,22 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final state = ref.watch(chatControllerProvider(args));
     final controller = ref.read(chatControllerProvider(args).notifier);
 
-    // React to new error codes by surfacing a snackbar.
-    ref.listen(chatControllerProvider(args), (prev, next) {
-      if (next.error != null && next.error != prev?.error) {
-        final msg = _translateSendError(context, next.error) ?? next.error!;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(msg)),
-        );
-      }
-    });
-
     _maybeScrollToBottom(state.messages.length);
 
+    final showRequestBanner = widget.chat.embeddedContactRequestId != null &&
+        !state.messagingReady;
+
     return Scaffold(
+      backgroundColor: theme.chatBackground,
       appBar: AppBar(
         titleSpacing: 0,
+        backgroundColor: theme.chatBackground,
         title: Row(
           children: [
             TxAvatar(
               name: widget.chat.displayName,
               image: widget.chat.avatarImage,
-              size: 36,
+              size: 38,
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -113,17 +90,16 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                         : widget.chat.displayName,
                     style: tt.titleMedium?.copyWith(
                       color: cs.onSurface,
-                      fontWeight: FontWeight.w600,
+                      fontWeight: FontWeight.bold,
                     ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
                   Text(
-                    widget.chat.chatType == 'group'
-                        ? t.translate('chat_type_group')
-                        : t.translate('chat_type_contact'),
-                    style: tt.labelSmall?.copyWith(
-                      color: cs.onSurfaceVariant,
+                    'был(а) недавно', // Статус Telegram
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: cs.onSurfaceVariant.withValues(alpha: 0.7),
                     ),
                   ),
                 ],
@@ -131,33 +107,40 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             ),
           ],
         ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.call_outlined),
+            onPressed: () {},
+          ),
+          IconButton(
+            icon: const Icon(Icons.more_vert_rounded),
+            onPressed: () {},
+          ),
+        ],
       ),
       body: Column(
         children: [
-          Expanded(child: _body(context, state, controller)),
-          if (widget.chat.embeddedContactRequestId != null && !state.messagingReady)
-            Container(
-              padding: const EdgeInsets.all(16),
-              color: cs.surfaceContainer,
-              child: Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: () => controller.rejectRequest(widget.chat.embeddedContactRequestId!),
-                      icon: const Icon(Icons.close_rounded, color: Colors.red),
-                      label: const Text('Отклонить', style: TextStyle(color: Colors.red)),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: FilledButton.icon(
-                      onPressed: () => controller.acceptRequest(widget.chat.embeddedContactRequestId!),
-                      icon: const Icon(Icons.check_rounded),
-                      label: const Text('Принять'),
-                    ),
-                  ),
-                ],
-              ),
+          // 1. Панель закрепленного сообщения (Pinned Bar)
+          _PinnedMessageBar(
+            title: 'Документация.txt',
+            onTap: () {},
+          ),
+
+          // 2. Список сообщений с разделителями дат
+          Expanded(child: _buildMessageList(context, state)),
+
+          // 3. Панель ввода или кнопки Принять/Отклонить запрос
+          if (showRequestBanner)
+            _ContactRequestBanner(
+              onRequestAction: (accept) async {
+                final id = widget.chat.embeddedContactRequestId!;
+                if (accept) {
+                  await controller.acceptContactRequest(id);
+                } else {
+                  await controller.rejectContactRequest(id);
+                  if (context.mounted) Navigator.pop(context);
+                }
+              },
             )
           else
             ComposeBar(
@@ -170,11 +153,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     );
   }
 
-  Widget _body(
-    BuildContext context,
-    ChatState state,
-    ChatController controller,
-  ) {
+  Widget _buildMessageList(BuildContext context, ChatState state) {
     final t = AppLocalizations.of(context);
     if (state.loading && state.messages.isEmpty) {
       return const Center(child: CircularProgressIndicator());
@@ -185,12 +164,164 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         title: t.translate('no_messages_yet'),
       );
     }
+
+    // Группировка с разделителями дат (21 июля, 22 июля)
+    final items = <Widget>[];
+    DateTime? lastDate;
+
+    for (final msg in state.messages) {
+      if (msg.time != null) {
+        final msgDate = DateTime(msg.time!.year, msg.time!.month, msg.time!.day);
+        if (lastDate == null || lastDate != msgDate) {
+          lastDate = msgDate;
+          items.add(_DateDivider(date: msg.time!));
+        }
+      }
+      items.add(MessageBubble(message: msg));
+    }
+
     return ListView.builder(
       controller: _scrollCtrl,
       padding: const EdgeInsets.symmetric(vertical: 8),
-      itemCount: state.messages.length,
-      itemBuilder: (context, index) =>
-          MessageBubble(message: state.messages[index]),
+      itemCount: items.length,
+      itemBuilder: (context, index) => items[index],
+    );
+  }
+}
+
+/// Закрепленное сообщение вверху
+class _PinnedMessageBar extends StatelessWidget {
+  const _PinnedMessageBar({required this.title, required this.onTap});
+
+  final String title;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      color: cs.surfaceContainerHigh.withValues(alpha: 0.5),
+      child: Row(
+        children: [
+          Container(
+            width: 3,
+            height: 32,
+            decoration: BoxDecoration(
+              color: cs.primary,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Закреплённое сообщение',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: cs.primary,
+                  ),
+                ),
+                Text(
+                  title,
+                  style: TextStyle(fontSize: 13, color: cs.onSurface),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.volume_off_rounded, size: 20),
+            onPressed: () {},
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Плашка запроса контакта (Принять / Отклонить)
+class _ContactRequestBanner extends StatelessWidget {
+  const _ContactRequestBanner({required this.onRequestAction});
+
+  final Function(bool accept) onRequestAction;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerHighest,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text(
+            'Хочет добавить вас в контакты',
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () => onRequestAction(false),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.redAccent,
+                    side: const BorderSide(color: Colors.redAccent),
+                  ),
+                  child: const Text('Отклонить'),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: FilledButton(
+                  onPressed: () => onRequestAction(true),
+                  child: const Text('Принять'),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Разделитель дат (например: "22 июля")
+class _DateDivider extends StatelessWidget {
+  const _DateDivider({required this.date});
+  final DateTime date;
+
+  @override
+  Widget build(BuildContext context) {
+    final formatted = DateFormat('d MMMM', 'ru').format(date);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: Center(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.4),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Text(
+            formatted,
+            style: const TextStyle(
+              color: Colors.white70,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

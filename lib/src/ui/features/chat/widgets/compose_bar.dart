@@ -1,11 +1,6 @@
-// TangleX — compose bar.
-//
-// Material 3 text input + send IconButton.  When the contact handshake is
-// not finished, the input is disabled and a hint is shown above it
-// (HANDOFF.md § 8 point 4).
+// Telegram Style Compose Bar
 
 import 'package:flutter/material.dart';
-
 import '../../../../localization/app_localizations.dart';
 
 class ComposeBar extends StatefulWidget {
@@ -26,7 +21,6 @@ class ComposeBar extends StatefulWidget {
 
 class _ComposeBarState extends State<ComposeBar> {
   final _controller = TextEditingController();
-  final _focus = FocusNode();
   bool _hasText = false;
 
   @override
@@ -41,7 +35,6 @@ class _ComposeBarState extends State<ComposeBar> {
   @override
   void dispose() {
     _controller.dispose();
-    _focus.dispose();
     super.dispose();
   }
 
@@ -59,62 +52,88 @@ class _ComposeBarState extends State<ComposeBar> {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final tt = Theme.of(context).textTheme;
     final t = AppLocalizations.of(context);
-    final canSend = widget.enabled && _hasText && !widget.sending;
 
-    return Material(
-      color: cs.surfaceContainer,
-      child: SafeArea(
-        top: false,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (!widget.enabled)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-                  child: Text(
-                    t.translate('chat_wait_send'),
-                    style: tt.bodySmall?.copyWith(color: cs.tertiary),
-                  ),
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.all(8.0),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            // Текстовое поле в стиле Telegram
+            Expanded(
+              child: Container(
+                decoration: BoxDecoration(
+                  color: cs.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(24),
                 ),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _controller,
-                      focusNode: _focus,
-                      enabled: widget.enabled && !widget.sending,
-                      minLines: 1,
-                      maxLines: 5,
-                      textInputAction: TextInputAction.newline,
-                      decoration: InputDecoration(
-                        hintText: t.translate('message_placeholder'),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    // Кнопка GIF / Emoji
+                    IconButton(
+                      icon: const Text(
+                        'GIF',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 12,
+                        ),
+                      ),
+                      onPressed: () {},
+                    ),
+
+                    // Поле ввода
+                    Expanded(
+                      child: TextField(
+                        controller: _controller,
+                        enabled: widget.enabled && !widget.sending,
+                        minLines: 1,
+                        maxLines: 5,
+                        decoration: InputDecoration(
+                          hintText: t.translate('message_placeholder'),
+                          border: InputBorder.none,
+                          enabledBorder: InputBorder.none,
+                          focusedBorder: InputBorder.none,
+                          contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                        ),
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  IconButton.filled(
-                    onPressed: canSend ? _handleSend : null,
-                    icon: widget.sending
-                        ? SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2.5,
-                              color: cs.onPrimary,
-                            ),
-                          )
-                        : const Icon(Icons.send_rounded),
-                  ),
-                ],
+
+                    // Иконка скрепки (Прикрепить)
+                    IconButton(
+                      icon: const Icon(Icons.attach_file_rounded),
+                      onPressed: () {},
+                    ),
+                  ],
+                ),
               ),
-            ],
-          ),
+            ),
+            const SizedBox(width: 8),
+
+            // Круглая синяя кнопка (Отправка / Микрофон)
+            GestureDetector(
+              onTap: _hasText ? _handleSend : null,
+              child: CircleAvatar(
+                radius: 22,
+                backgroundColor: cs.primary,
+                child: widget.sending
+                    ? SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: cs.onPrimary,
+                        ),
+                      )
+                    : Icon(
+                        _hasText ? Icons.send_rounded : Icons.mic_rounded,
+                        color: cs.onPrimary,
+                        size: 20,
+                      ),
+              ),
+            ),
+          ],
         ),
       ),
     );

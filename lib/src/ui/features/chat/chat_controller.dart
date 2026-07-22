@@ -1,14 +1,6 @@
-// TangleX — single-chat controller.
-//
-// Owns the message list for one chatRef. Subscribes to TanglexService.events,
-// patches/appends/removes UiMessage entries on the fly. Per HANDOFF.md § 6 we
-// debounce repeated refreshes from bursts of events.
-//
-// Family parameter: chatRef ('@<id>' or '#<id>'). When the screen is closed
-// the autoDispose kicks in and the event subscription is dropped.
+// TangleX — single-chat controller with contact request handling.
 
 import 'dart:async';
-
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../main.dart';
@@ -23,7 +15,6 @@ class ChatState {
     this.sending = false,
     this.error,
     this.messagingReady = true,
-    this.contactRequestId,
   });
 
   final bool loading;
@@ -31,7 +22,6 @@ class ChatState {
   final bool sending;
   final String? error;
   final bool messagingReady;
-  final int? contactRequestId;
 
   ChatState copyWith({
     bool? loading,
@@ -40,7 +30,6 @@ class ChatState {
     String? error,
     bool clearError = false,
     bool? messagingReady,
-    int? contactRequestId,
   }) =>
       ChatState(
         loading: loading ?? this.loading,
@@ -48,7 +37,6 @@ class ChatState {
         sending: sending ?? this.sending,
         error: clearError ? null : (error ?? this.error),
         messagingReady: messagingReady ?? this.messagingReady,
-        contactRequestId: contactRequestId ?? this.contactRequestId,
       );
 }
 
@@ -76,12 +64,9 @@ class ChatController extends StateNotifier<ChatState> {
         final ui = parseChatItem(m);
         if (ui != null) parsed.add(ui);
       }
-      // The core returns chronological order already; ensure newest last.
       parsed.sort(
-        (a, b) =>
-            (a.time ?? DateTime.fromMillisecondsSinceEpoch(0)).compareTo(
-          b.time ?? DateTime.fromMillisecondsSinceEpoch(0),
-        ),
+        (a, b) => (a.time ?? DateTime.fromMillisecondsSinceEpoch(0))
+            .compareTo(b.time ?? DateTime.fromMillisecondsSinceEpoch(0)),
       );
       if (!mounted) return;
       state = state.copyWith(
@@ -99,6 +84,28 @@ class ChatController extends StateNotifier<ChatState> {
     final ready = await _service.getContactMessagingReady(chatRef);
     if (!mounted || ready == null) return;
     state = state.copyWith(messagingReady: ready);
+  }
+
+  /// Принять запрос в контакты
+  Future<bool> acceptContactRequest(int requestId) async {
+    final ok = await _service.acceptContactRequest(requestId);
+    if (ok) {
+      if (!mounted) return true;
+      state = state.copyWith(messagingReady: true);
+      await _refreshMessagingReady();
+      await refresh();
+    }
+    return ok;
+  }
+
+  /// Отклонить запрос в контакты
+  Future<bool> rejectContactRequest(int requestId) async {
+    final ok = await _service.rejectContactRequest(requestId);
+    if (ok) {
+      if (!mounted) return true;
+      await refresh();
+    }
+    return ok;
   }
 
   void _onEvent(Map<String, dynamic> event) {
@@ -119,7 +126,7 @@ class ChatController extends StateNotifier<ChatState> {
         break;
       case 'contactSndReady':
       case 'contact':
-        if (isContact) _refreshMessagingReady();
+        _refreshMessagingReady();
         break;
     }
   }
@@ -127,24 +134,6 @@ class ChatController extends StateNotifier<ChatState> {
   void _scheduleRefresh() {
     _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 200), refresh);
-  }
-
-  Future<void> acceptRequest(int contactRequestId) async {
-    final ok = await _service.acceptContactRequest(contactRequestId);
-    if (ok) {
-      if (!mounted) return;
-      state = state.copyWith(messagingReady: true);
-      await _refreshMessagingReady();
-      await refresh();
-    }
-  }
-
-  Future<void> rejectRequest(int contactRequestId) async {
-    final ok = await _service.rejectContactRequest(contactRequestId);
-    if (ok) {
-      if (!mounted) return;
-      await refresh();
-    }
   }
 
   Future<bool> sendText(String text) async {
@@ -161,7 +150,6 @@ class ChatController extends StateNotifier<ChatState> {
       return false;
     }
     state = state.copyWith(sending: false, clearError: true);
-    // The core will emit a chatItemNew event; the listener will refresh.
     return true;
   }
 
@@ -173,7 +161,6 @@ class ChatController extends StateNotifier<ChatState> {
   }
 }
 
-/// Parameters for the chat controller family.
 class ChatArgs {
   const ChatArgs({required this.chatRef, required this.isContact});
   final String chatRef;

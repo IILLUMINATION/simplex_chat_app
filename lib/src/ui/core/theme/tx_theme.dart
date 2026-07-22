@@ -38,20 +38,20 @@ class TxChatTheme extends ThemeExtension<TxChatTheme> {
   final Color timeTextColor;
   final Color quoteBorderColor;
 
-  /// Пресет: Глубокая AMOLED Темы (Telegram Dark стиль)
+  /// Пресет: Telegram Dark / AMOLED со свежими фиолетовыми исходящими
   factory TxChatTheme.amoledDark() {
     return const TxChatTheme(
-      myBubbleBg: Color(0xFF2B5278),
+      myBubbleBg: Color(0xFF7636D6), // Яркий пурпурный/фиолетовый ТГ
       myBubbleFg: Colors.white,
-      peerBubbleBg: Color(0xFF182533),
+      peerBubbleBg: Color(0xFF1E2C3A), // Тёмный сланцевый ТГ
       peerBubbleFg: Colors.white,
       myBubbleGradient: null,
       peerBubbleGradient: null,
-      chatBackground: Color(0xFF0E1621),
-      wallpaperPatternOpacity: 0.05,
+      chatBackground: Color(0xFF0E1621), // Глубокий темный фон
+      wallpaperPatternOpacity: 0.08,
       bubbleStyle: TxBubbleStyle.telegram,
       bubbleRadius: 16.0,
-      timeTextColor: Color(0xAAFFFFFF),
+      timeTextColor: Color(0xBBFFFFFF),
       quoteBorderColor: Color(0xFF64B5F6),
     );
   }
