@@ -54,10 +54,10 @@ class ChatState {
 
 class ChatController extends StateNotifier<ChatState> {
   ChatController(this._service, this.chatRef, {required this.isContact})
-      : super(const ChatState()) {
+      : super(const ChatState(messagingReady: false)) {
     _sub = _service.eventStream.listen(_onEvent);
     refresh();
-    if (isContact) _refreshMessagingReady();
+    _refreshMessagingReady();
   }
 
   final TanglexService _service;

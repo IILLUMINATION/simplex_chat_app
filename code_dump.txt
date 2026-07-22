@@ -5845,10 +5845,10 @@ class ChatState {
 
 class ChatController extends StateNotifier<ChatState> {
   ChatController(this._service, this.chatRef, {required this.isContact})
-      : super(const ChatState()) {
+      : super(const ChatState(messagingReady: false)) {
     _sub = _service.eventStream.listen(_onEvent);
     refresh();
-    if (isContact) _refreshMessagingReady();
+    _refreshMessagingReady();
   }
 
   final TanglexService _service;
@@ -6131,7 +6131,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       body: Column(
         children: [
           Expanded(child: _body(context, state, controller)),
-          if ((widget.chat.chatType == 'contactRequest' || widget.chat.chatType == 'contact') && widget.chat.embeddedContactRequestId != null && !state.messagingReady)
+          if (widget.chat.embeddedContactRequestId != null && !state.messagingReady)
             Container(
               padding: const EdgeInsets.all(16),
               color: cs.surfaceContainer,
