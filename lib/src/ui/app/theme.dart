@@ -8,6 +8,7 @@
 // a `DESIGN.md`. Replace only the seed below to re-skin the whole app.
 
 import 'package:flutter/material.dart';
+import '../core/theme/tx_theme.dart';
 
 /// Placeholder seed color until DESIGN.md ships.
 const Color kBrandSeed = Color(0xFF2AABEE);
@@ -36,6 +37,9 @@ ThemeData _themeFromScheme(ColorScheme colorScheme) {
     useMaterial3: true,
     colorScheme: colorScheme,
     scaffoldBackgroundColor: colorScheme.surface,
+    extensions: [
+      TxChatTheme.amoledDark(),
+    ],
     appBarTheme: AppBarTheme(
       backgroundColor: colorScheme.surface,
       foregroundColor: colorScheme.onSurface,

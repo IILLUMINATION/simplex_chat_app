@@ -11,6 +11,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'src/service/tanglex_service.dart';
 import 'src/ui/app/app.dart';
+import 'src/ui/core/plugins/renderers/text_message_renderer.dart';
+import 'src/ui/core/plugins/tx_plugin_registry.dart';
 
 /// Global Riverpod provider for the FFI-backed SimpleX service.
 ///
@@ -21,7 +23,15 @@ final tanglexServiceProvider = Provider<TanglexService>((ref) {
   return service;
 });
 
+void _setupPlugins() {
+  // Регистрируем встроенные рендереры сообщений
+  final registry = TxPluginRegistry.instance;
+  registry.registerRenderer(TextMessageRenderer());
+  // Сюда же позже добавим: ImageRenderer, VoiceRenderer, CircleVideoRenderer, StickerRenderer
+}
+
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  _setupPlugins();
   runApp(const ProviderScope(child: TangleXApp()));
 }
