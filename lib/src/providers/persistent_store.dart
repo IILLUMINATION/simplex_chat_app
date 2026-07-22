@@ -137,6 +137,11 @@ class ChatPreview {
     final contactRequest = chatInfo['contactRequest'] as Map<String, dynamic>?;
     final chatItems = json['chatItems'] as List?;
 
+    // Проверяем наличие contactRequestId на уровне chatInfo или внутри contactRequest/contact
+    int? reqId = chatInfo['contactRequestId'] as int?;
+    reqId ??= contactRequest?['contactRequestId'] as int?;
+    reqId ??= contact?['contactRequestId'] as int?;
+
     String lastMsg = '';
     int? ts;
     bool lastFromMe = false;
@@ -163,16 +168,17 @@ class ChatPreview {
     bool? contactUsed;
     Uint8List? avatar;
     String? connStatusType;
-    int? embeddedContactRequestId;
+    int? embeddedContactRequestId = reqId;
 
-    if (chatType == 'contactRequest' && contactRequest != null) {
+    if (chatType == 'contactRequest' || contactRequest != null || (reqId != null && contact == null && group == null)) {
       type = 'contactRequest';
-      final profile = contactRequest['profile'] as Map<String, dynamic>?;
+      final profile = contactRequest?['profile'] as Map<String, dynamic>? ?? contact?['profile'] as Map<String, dynamic>?;
       name =
           profile?['displayName'] as String? ??
-          contactRequest['localDisplayName'] as String? ??
+          contactRequest?['localDisplayName'] as String? ??
+          contact?['localDisplayName'] as String? ??
           '';
-      id = contactRequest['contactRequestId'] as int?;
+      id = reqId ?? contactRequest?['contactRequestId'] as int?;
       embeddedContactRequestId = id;
       final img = profile?['image'] as String?;
       avatar = _decodeImage(img);
@@ -190,7 +196,8 @@ class ChatPreview {
       avatar = _decodeImage(img);
       final activeConn = contact['activeConn'] as Map<String, dynamic>?;
       connStatusType = _connStatusTypeFromActiveConn(activeConn);
-      embeddedContactRequestId = contact['contactRequestId'] as int?;
+      embeddedContactRequestId ??= contact['contactRequestId'] as int?;
+      // Если у контакта есть неприятый embeddedContactRequestId, классифицируем его для показа кнопок принятия
     } else if (group != null) {
       type = 'group';
       name =
@@ -209,11 +216,14 @@ class ChatPreview {
       name = '';
     }
 
+    // Если у контакта есть embeddedContactRequestId, убедимся что chatRef и тип позволяют с ним работать
+    final finalType = (embeddedContactRequestId != null && type == 'contact') ? 'contact' : type;
+
     return ChatPreview(
-      chatRef: type == 'contactRequest'
-          ? '@c_${id ?? '?'}'
-          : (type == 'group' ? '#${id ?? '?'}' : '@${id ?? '?'}'),
-      chatType: type,
+      chatRef: finalType == 'contactRequest'
+          ? '@c_${id ?? id ?? '?'}'
+          : (finalType == 'group' ? '#${id ?? id ?? '?'}' : '@${id ?? id ?? '?'}'),
+      chatType: finalType,
       displayName: name,
       lastMessage: lastMsg,
       timestamp: ts,
