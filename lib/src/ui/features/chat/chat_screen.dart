@@ -135,7 +135,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       body: Column(
         children: [
           Expanded(child: _body(context, state, controller)),
-          if (widget.chat.chatType == 'contactRequest' && widget.chat.embeddedContactRequestId != null)
+          if ((widget.chat.chatType == 'contactRequest' || widget.chat.chatType == 'contact') && widget.chat.embeddedContactRequestId != null)
             Container(
               padding: const EdgeInsets.all(16),
               color: cs.surfaceContainer,
