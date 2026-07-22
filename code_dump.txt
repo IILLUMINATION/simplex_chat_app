@@ -6550,65 +6550,67 @@ class MessageBubble extends StatelessWidget {
             child: GestureDetector(
               onTap: onTap,
               onLongPress: onLongPress,
-              child: Container(
-                constraints: BoxConstraints(
-                  maxWidth: MediaQuery.of(context).size.width * 0.78,
-                ),
-                decoration: BoxDecoration(
-                  color: gradient == null ? bg : null,
-                  gradient: gradient,
-                  borderRadius: borderRadius,
-                ),
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    // Блок цитируемого сообщения (если это ответ)
-                    if (message.quoted != null)
-                      _QuotedBlock(quoted: message.quoted!, fromMe: fromMe),
-
-                    // Содержимое, отрисованное зарегистрированным плагином
-                    if (renderer != null)
-                      renderer.buildContent(
-                        TxMessageRenderContext(
-                          context: context,
-                          message: message,
-                          isMe: fromMe,
-                        ),
-                      )
-                    else
-                      // Фолбэк, если плагин для редкого типа сообщения ещё не зарегистрирован
-                      Text(
-                        message.text,
-                        style: TextStyle(color: fg),
-                      ),
-
-                    const SizedBox(height: 2),
-
-                    // Время и статус сообщения (галочки)
-                    Align(
-                      alignment: Alignment.bottomRight,
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            message.timeStr,
-                            style: TextStyle(
-                              color: theme.timeTextColor,
-                              fontSize: 11,
-                            ),
-                          ),
-                          if (fromMe && message.status.isNotEmpty) ...[
-                            const SizedBox(width: 4),
-                            _StatusIcon(status: message.status, color: theme.timeTextColor),
-                          ],
-                        ],
-                      ),
+                child: IntrinsicWidth(
+                  child: Container(
+                    constraints: BoxConstraints(
+                      maxWidth: MediaQuery.of(context).size.width * 0.78,
                     ),
-                  ],
+                    decoration: BoxDecoration(
+                      color: gradient == null ? bg : null,
+                      gradient: gradient,
+                      borderRadius: borderRadius,
+                    ),
+                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        // Блок цитируемого сообщения (если это ответ)
+                        if (message.quoted != null)
+                          _QuotedBlock(quoted: message.quoted!, fromMe: fromMe),
+
+                        // Содержимое, отрисованное зарегистрированным плагином
+                        if (renderer != null)
+                          renderer.buildContent(
+                            TxMessageRenderContext(
+                              context: context,
+                              message: message,
+                              isMe: fromMe,
+                            ),
+                          )
+                        else
+                          // Фолбэк, если плагин для редкого типа сообщения ещё не зарегистрирован
+                          Text(
+                            message.text,
+                            style: TextStyle(color: fg),
+                          ),
+
+                        const SizedBox(height: 2),
+
+                        // Время и статус сообщения (галочки)
+                        Align(
+                          alignment: Alignment.bottomRight,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                message.timeStr,
+                                style: TextStyle(
+                                  color: theme.timeTextColor,
+                                  fontSize: 11,
+                                ),
+                              ),
+                              if (fromMe && message.status.isNotEmpty) ...[
+                                const SizedBox(width: 4),
+                                _StatusIcon(status: message.status, color: theme.timeTextColor),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
-              ),
             ),
           ),
         ],
