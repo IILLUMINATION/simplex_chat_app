@@ -216,15 +216,20 @@ class ChatPreview {
       name = '';
     }
 
-    // Если у контакта есть embeddedContactRequestId, убедимся что chatRef и тип позволяют с ним работать
-    final finalType = (embeddedContactRequestId != null && type == 'contact') ? 'contact' : type;
+    final finalType = (embeddedContactRequestId != null && type == 'contact' && id != null) ? 'contact' : type;
+
+    final bool isRequestPending = embeddedContactRequestId != null && (id == null || finalType == 'contactRequest');
+    final String resolvedChatRef;
+    if (isRequestPending) {
+      resolvedChatRef = '@c_$embeddedContactRequestId';
+    } else if (finalType == 'group') {
+      resolvedChatRef = '#${id ?? '?'}';
+    } else {
+      resolvedChatRef = '@${id ?? '?'}';
+    }
 
     return ChatPreview(
-      chatRef: (embeddedContactRequestId != null && type == 'contact')
-          ? '@c_$embeddedContactRequestId'
-          : (finalType == 'contactRequest'
-              ? '@c_${id ?? '?'}'
-              : (finalType == 'group' ? '#${id ?? '?'}' : '@${id ?? '?'}')),
+      chatRef: resolvedChatRef,
       chatType: finalType,
       displayName: name,
       lastMessage: lastMsg,
