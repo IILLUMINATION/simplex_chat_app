@@ -44,7 +44,6 @@ class ProfileScreen extends ConsumerWidget {
                 (profile?['displayName'] as String?)?.trim() ?? '';
             final fullName = (profile?['fullName'] as String?)?.trim() ?? '';
             final descr = (profile?['shortDescr'] as String?)?.trim() ?? '';
-            final userId = data?['userId'] as int?;
 
             if (profile == null || displayName.isEmpty) {
               return _NoProfileView(ref: ref);
@@ -53,7 +52,6 @@ class ProfileScreen extends ConsumerWidget {
             return CustomScrollView(
               physics: const AlwaysScrollableScrollPhysics(),
               slivers: [
-                // 1. Telegram-style Hero Header с кнопками действий
                 SliverToBoxAdapter(
                   child: _TelegramProfileHeader(
                     displayName: displayName,
@@ -61,19 +59,15 @@ class ProfileScreen extends ConsumerWidget {
                     ref: ref,
                   ),
                 ),
-
-                // 2. Блок информации о пользователе (SimpleX Address & Bio)
                 SliverToBoxAdapter(
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
                     child: _InfoGroupCard(
-                      userId: userId,
                       shortDescr: descr,
+                      ref: ref,
                     ),
                   ),
                 ),
-
-                // 3. Блок настроек интерфейса и языка
                 SliverToBoxAdapter(
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
@@ -89,8 +83,7 @@ class ProfileScreen extends ConsumerWidget {
   }
 }
 
-/// 1. Шапка в стиле Telegram с аватаркой, градиентным фоном и быстрыми экшенами
-class _TelegramProfileHeader extends StatelessWidget {
+class _TelegramProfileHeader extends ConsumerWidget {
   const _TelegramProfileHeader({
     required this.displayName,
     required this.fullName,
@@ -102,7 +95,7 @@ class _TelegramProfileHeader extends StatelessWidget {
   final WidgetRef ref;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final cs = Theme.of(context).colorScheme;
     final theme = context.txTheme;
 
@@ -122,28 +115,52 @@ class _TelegramProfileHeader extends StatelessWidget {
         child: Column(
           children: [
             const SizedBox(height: 20),
-            // Аватар со стильным свечением
-            Container(
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                boxShadow: [
-                  BoxShadow(
-                    color: cs.primary.withValues(alpha: 0.25),
-                    blurRadius: 24,
-                    spreadRadius: 4,
+            Stack(
+              alignment: Alignment.bottomRight,
+              children: [
+                Container(
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: cs.primary.withValues(alpha: 0.25),
+                        blurRadius: 24,
+                        spreadRadius: 4,
+                      ),
+                    ],
                   ),
-                ],
-              ),
-              child: TxAvatar(name: displayName, size: 100),
+                  child: TxAvatar(name: displayName, size: 100),
+                ),
+                Positioned(
+                  bottom: 0,
+                  right: 0,
+                  child: Material(
+                    color: cs.primary,
+                    shape: const CircleBorder(),
+                    child: InkWell(
+                      onTap: () => _showAvatarPicker(context, ref),
+                      customBorder: const CircleBorder(),
+                      child: Padding(
+                        padding: const EdgeInsets.all(8),
+                        child: Icon(
+                          Icons.camera_alt_rounded,
+                          size: 18,
+                          color: cs.onPrimary,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 14),
-            // Имя
             Text(
               displayName,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 22,
                 fontWeight: FontWeight.bold,
                 letterSpacing: 0.2,
+                color: theme.peerBubbleFg,
               ),
             ),
             if (fullName.isNotEmpty && fullName != displayName) ...[
@@ -157,7 +174,6 @@ class _TelegramProfileHeader extends StatelessWidget {
               ),
             ],
             const SizedBox(height: 4),
-            // Статус приватности SimpleX
             Row(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -181,8 +197,6 @@ class _TelegramProfileHeader extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 20),
-
-            // Ряд быстрых кнопок действий в стиле Telegram (QR / Edit / Theme)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Row(
@@ -242,9 +256,31 @@ class _TelegramProfileHeader extends StatelessWidget {
       builder: (_) => _QrCodeSheet(ref: ref),
     );
   }
+
+  void _showAvatarPicker(BuildContext context, WidgetRef ref) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      builder: (ctx) => SafeArea(
+        child: Wrap(
+          children: [
+            ListTile(
+              leading: const Icon(Icons.image_rounded),
+              title: const Text('Выбрать аватар (заглушка)'),
+              onTap: () {
+                Navigator.pop(ctx);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Смена аватара через галерею в разработке')),
+                );
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
-/// Кнопки в шапке (Плавающие карточки)
 class _HeaderActionButton extends StatelessWidget {
   const _HeaderActionButton({
     required this.icon,
@@ -274,7 +310,11 @@ class _HeaderActionButton extends StatelessWidget {
               const SizedBox(height: 4),
               Text(
                 label,
-                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: theme.peerBubbleFg,
+                ),
               ),
             ],
           ),
@@ -284,12 +324,42 @@ class _HeaderActionButton extends StatelessWidget {
   }
 }
 
-/// 2. Карточка с личной информацией
-class _InfoGroupCard extends StatelessWidget {
-  const _InfoGroupCard({this.userId, required this.shortDescr});
+class _InfoGroupCard extends StatefulWidget {
+  const _InfoGroupCard({required this.shortDescr, required this.ref});
 
-  final int? userId;
   final String shortDescr;
+  final WidgetRef ref;
+
+  @override
+  State<_InfoGroupCard> createState() => _InfoGroupCardState();
+}
+
+class _InfoGroupCardState extends State<_InfoGroupCard> {
+  String? _connLink;
+  bool _loadingLink = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchLink();
+  }
+
+  Future<void> _fetchLink() async {
+    try {
+      final service = widget.ref.read(tanglexServiceProvider);
+      final link = await service.createConnectionLink();
+      if (mounted) {
+        setState(() {
+          _connLink = link;
+          _loadingLink = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() => _loadingLink = false);
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -307,7 +377,7 @@ class _InfoGroupCard extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
             child: Text(
-              'ИНФОРМАЦИЯ',
+              'ПРИВАТНАЯ ССЫЛКА СВЯЗИ',
               style: TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.bold,
@@ -317,25 +387,44 @@ class _InfoGroupCard extends StatelessWidget {
             ),
           ),
           ListTile(
-            leading: const Icon(Icons.tag_rounded),
-            title: Text(userId != null ? '@$userId' : '—'),
-            subtitle: const Text('ID пользователя SimpleX'),
-            trailing: const Icon(Icons.copy_rounded, size: 18),
+            leading: Icon(Icons.link_rounded, color: theme.peerBubbleFg),
+            title: Text(
+              _loadingLink
+                  ? 'Генерация ссылки...'
+                  : (_connLink ?? 'Не удалось получить ссылку'),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 13,
+                color: theme.peerBubbleFg,
+              ),
+            ),
+            subtitle: Text(
+              'Ссылка для добавления вас в чат SimpleX',
+              style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant),
+            ),
+            trailing: Icon(Icons.copy_rounded, size: 18, color: theme.peerBubbleFg),
             onTap: () {
-              if (userId != null) {
-                Clipboard.setData(ClipboardData(text: '@$userId'));
+              if (_connLink != null) {
+                Clipboard.setData(ClipboardData(text: _connLink!));
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('ID скопирован')),
+                  const SnackBar(content: Text('Ссылка связи скопирована в буфер обмена')),
                 );
               }
             },
           ),
-          if (shortDescr.isNotEmpty) ...[
+          if (widget.shortDescr.isNotEmpty) ...[
             Divider(height: 1, color: cs.outlineVariant.withValues(alpha: 0.3)),
             ListTile(
-              leading: const Icon(Icons.info_outline_rounded),
-              title: Text(shortDescr),
-              subtitle: const Text('О себе'),
+              leading: Icon(Icons.info_outline_rounded, color: theme.peerBubbleFg),
+              title: Text(
+                widget.shortDescr,
+                style: TextStyle(color: theme.peerBubbleFg),
+              ),
+              subtitle: Text(
+                'О себе',
+                style: TextStyle(color: cs.onSurfaceVariant),
+              ),
             ),
           ],
         ],
@@ -344,7 +433,6 @@ class _InfoGroupCard extends StatelessWidget {
   }
 }
 
-/// 3. Карточка настроек
 class _SettingsGroupCard extends StatelessWidget {
   const _SettingsGroupCard({required this.ref});
 
@@ -377,9 +465,15 @@ class _SettingsGroupCard extends StatelessWidget {
             ),
           ),
           ListTile(
-            leading: const Icon(Icons.translate_rounded),
-            title: const Text('Язык'),
-            subtitle: Text(localeData.locale == 'ru' ? 'Русский' : 'English'),
+            leading: Icon(Icons.translate_rounded, color: theme.peerBubbleFg),
+            title: Text(
+              'Язык',
+              style: TextStyle(color: theme.peerBubbleFg),
+            ),
+            subtitle: Text(
+              localeData.locale == 'ru' ? 'Русский' : 'English',
+              style: TextStyle(color: cs.onSurfaceVariant),
+            ),
             trailing: SegmentedButton<String>(
               segments: const [
                 ButtonSegment(value: 'en', label: Text('EN')),
@@ -401,7 +495,6 @@ class _SettingsGroupCard extends StatelessWidget {
   }
 }
 
-/// Modal Bottom Sheet с QR-кодом адреса SimpleX
 class _QrCodeSheet extends StatefulWidget {
   const _QrCodeSheet({required this.ref});
   final WidgetRef ref;
@@ -465,8 +558,6 @@ class _QrCodeSheetState extends State<_QrCodeSheet> {
             style: TextStyle(color: cs.onSurfaceVariant, fontSize: 13),
           ),
           const SizedBox(height: 24),
-
-          // Отрисовка QR-кода
           if (_loading)
             const SizedBox(
               height: 200,
@@ -508,7 +599,6 @@ class _QrCodeSheetState extends State<_QrCodeSheet> {
   }
 }
 
-/// Легковесный CustomPainter для визуализации матрицы QR-кода
 class _SimpleQrPainter extends CustomPainter {
   _SimpleQrPainter(this.data);
   final String data;
@@ -519,18 +609,14 @@ class _SimpleQrPainter extends CustomPainter {
     const gridCount = 21;
     final cellSize = size.width / gridCount;
 
-    // Генерируем детерминированный паттерн на основе хэша строки data
     final bytes = utf8.encode(data);
     
-    // Рисуем угловые маркеры (Finder patterns)
     _drawSquare(canvas, paint, 0, 0, 7, cellSize);
     _drawSquare(canvas, paint, gridCount - 7, 0, 7, cellSize);
     _drawSquare(canvas, paint, 0, gridCount - 7, 7, cellSize);
 
-    // Рисуем внутреннюю матрицу
     for (int r = 0; r < gridCount; r++) {
       for (int c = 0; c < gridCount; c++) {
-        // Пропускаем углы
         if ((r < 7 && c < 7) ||
             (r < 7 && c >= gridCount - 7) ||
             (r >= gridCount - 7 && c < 7)) {
@@ -564,7 +650,6 @@ class _SimpleQrPainter extends CustomPainter {
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
-/// Экран редактирования имени
 class _EditProfileDialog extends StatefulWidget {
   const _EditProfileDialog({
     required this.ref,
@@ -632,21 +717,11 @@ class _EditProfileDialogState extends State<_EditProfileDialog> {
                     displayName: _nameCtrl.text.trim(),
                     fullName: _fullCtrl.text.trim(),
                   );
-                  try {
-                    final service = widget.ref.read(tanglexServiceProvider);
-                    await service.createUserProfile(
-                      displayName: _nameCtrl.text.trim(),
-                      fullName: _fullCtrl.text.trim(),
-                    );
-                    if (!mounted) return;
-                    widget.ref.invalidate(_activeUserProvider);
-                    if (!mounted) return;
-                    // ignore: use_build_context_synchronously
-                    Navigator.pop(context);
-                  } catch (_) {
-                    if (!mounted) return;
-                    setState(() => _loading = false);
-                  }
+                  if (!mounted) return;
+                  widget.ref.invalidate(_activeUserProvider);
+                  if (!mounted) return;
+                  // ignore: use_build_context_synchronously
+                  Navigator.pop(context);
                 },
           child: const Text('Сохранить'),
         ),
@@ -655,7 +730,6 @@ class _EditProfileDialogState extends State<_EditProfileDialog> {
   }
 }
 
-/// Заглушка, если профиль ещё не создан
 class _NoProfileView extends StatelessWidget {
   const _NoProfileView({required this.ref});
   final WidgetRef ref;
