@@ -3672,26 +3672,35 @@ class TanglexService {
 
       // Retry loop для DB-locked после первоначальной попытки.
       for (var attempt = 0;
-          attempt < 3 && _isDbLocked(initResult.response);
+          attempt < 5 && _isDbLocked(initResult.response);
           attempt++) {
-        _appendLog('DB is locked, retrying init (${attempt + 1}/3)...');
+        _appendLog('DB is locked, retrying init (${attempt + 1}/5)...');
         _native.stopEventLoop();
-        await Future<void>.delayed(Duration(milliseconds: 300 * (attempt + 1)));
+        await Future<void>.delayed(Duration(milliseconds: 500 * (attempt + 1)));
         initResult = await _attemptInit(pathToUse, passphrase);
       }
 
       if (_isDbLocked(initResult.response)) {
-        // Hot-restart can leave the previous native core holding the DB lock.
-        // Fallback to a temporary directory so dev session can continue.
+        // Hot-restart в режиме разработки не должен уходить во временную папку,
+        // если основная БД заблокирована предыдущим инстансом. Ждем и пробуем снова.
+        _appendLog('DB still locked after retries. Forcing unlock/wait...');
+        for (var attempt = 0; attempt < 5; attempt++) {
+          _native.stopEventLoop();
+          await Future<void>.delayed(const Duration(milliseconds: 1000));
+          initResult = await _attemptInit(pathToUse, passphrase);
+          if (initResult.ok) break;
+        }
+      }
+
+      if (_isDbLocked(initResult.response)) {
         final hotPath =
-            '${docsDir.path}/tanglex_data_hot_${DateTime.now().millisecondsSinceEpoch}';
+            '${docsDir.path}/tanglex_data'; // Используем всегда основной путь!
         _appendLog(
-          'DB still locked. Falling back to temporary data dir: $hotPath',
+          'DB still locked. Retrying main path: $hotPath',
         );
-        await Directory(hotPath).create(recursive: true);
         pathToUse = hotPath;
         initResult = await _attemptInit(pathToUse, passphrase);
-        _appendLog('migrateInitKey (hot): ok=${initResult.ok}');
+        _appendLog('migrateInitKey (forced main): ok=${initResult.ok}');
       }
 
       if (!initResult.ok) {
@@ -6122,7 +6131,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       body: Column(
         children: [
           Expanded(child: _body(context, state, controller)),
-          if ((widget.chat.chatType == 'contactRequest' || widget.chat.chatType == 'contact') && widget.chat.embeddedContactRequestId != null)
+          if ((widget.chat.chatType == 'contactRequest' || widget.chat.chatType == 'contact') && widget.chat.embeddedContactRequestId != null && !state.messagingReady)
             Container(
               padding: const EdgeInsets.all(16),
               color: cs.surfaceContainer,
