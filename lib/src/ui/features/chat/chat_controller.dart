@@ -132,6 +132,9 @@ class ChatController extends StateNotifier<ChatState> {
   Future<void> acceptRequest(int contactRequestId) async {
     final ok = await _service.acceptContactRequest(contactRequestId);
     if (ok) {
+      if (!mounted) return;
+      state = state.copyWith(messagingReady: true);
+      await _refreshMessagingReady();
       await refresh();
     }
   }
@@ -139,6 +142,7 @@ class ChatController extends StateNotifier<ChatState> {
   Future<void> rejectRequest(int contactRequestId) async {
     final ok = await _service.rejectContactRequest(contactRequestId);
     if (ok) {
+      if (!mounted) return;
       await refresh();
     }
   }

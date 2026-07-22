@@ -264,7 +264,9 @@ class _TelegramProfileHeader extends ConsumerWidget {
       builder: (ctx) => SafeArea(
         child: Wrap(
           children: [
-            ListTile(
+          Material(
+            color: Colors.transparent,
+            child: ListTile(
               leading: const Icon(Icons.image_rounded),
               title: const Text('Выбрать аватар (заглушка)'),
               onTap: () {
@@ -274,6 +276,7 @@ class _TelegramProfileHeader extends ConsumerWidget {
                 );
               },
             ),
+          ),
           ],
         ),
       ),
@@ -386,44 +389,50 @@ class _InfoGroupCardState extends State<_InfoGroupCard> {
               ),
             ),
           ),
-          ListTile(
-            leading: Icon(Icons.link_rounded, color: theme.peerBubbleFg),
-            title: Text(
-              _loadingLink
-                  ? 'Генерация ссылки...'
-                  : (_connLink ?? 'Не удалось получить ссылку'),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 13,
-                color: theme.peerBubbleFg,
+          Material(
+            color: Colors.transparent,
+            child: ListTile(
+              leading: Icon(Icons.link_rounded, color: theme.peerBubbleFg),
+              title: Text(
+                _loadingLink
+                    ? 'Генерация ссылки...'
+                    : (_connLink ?? 'Не удалось получить ссылку'),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 13,
+                  color: theme.peerBubbleFg,
+                ),
               ),
+              subtitle: Text(
+                'Ссылка для добавления вас в чат SimpleX',
+                style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant),
+              ),
+              trailing: Icon(Icons.copy_rounded, size: 18, color: theme.peerBubbleFg),
+              onTap: () {
+                if (_connLink != null) {
+                  Clipboard.setData(ClipboardData(text: _connLink!));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Ссылка связи скопирована в буфер обмена')),
+                  );
+                }
+              },
             ),
-            subtitle: Text(
-              'Ссылка для добавления вас в чат SimpleX',
-              style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant),
-            ),
-            trailing: Icon(Icons.copy_rounded, size: 18, color: theme.peerBubbleFg),
-            onTap: () {
-              if (_connLink != null) {
-                Clipboard.setData(ClipboardData(text: _connLink!));
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Ссылка связи скопирована в буфер обмена')),
-                );
-              }
-            },
           ),
           if (widget.shortDescr.isNotEmpty) ...[
             Divider(height: 1, color: cs.outlineVariant.withValues(alpha: 0.3)),
-            ListTile(
-              leading: Icon(Icons.info_outline_rounded, color: theme.peerBubbleFg),
-              title: Text(
-                widget.shortDescr,
-                style: TextStyle(color: theme.peerBubbleFg),
-              ),
-              subtitle: Text(
-                'О себе',
-                style: TextStyle(color: cs.onSurfaceVariant),
+            Material(
+              color: Colors.transparent,
+              child: ListTile(
+                leading: Icon(Icons.info_outline_rounded, color: theme.peerBubbleFg),
+                title: Text(
+                  widget.shortDescr,
+                  style: TextStyle(color: theme.peerBubbleFg),
+                ),
+                subtitle: Text(
+                  'О себе',
+                  style: TextStyle(color: cs.onSurfaceVariant),
+                ),
               ),
             ),
           ],
@@ -464,29 +473,32 @@ class _SettingsGroupCard extends StatelessWidget {
               ),
             ),
           ),
-          ListTile(
-            leading: Icon(Icons.translate_rounded, color: theme.peerBubbleFg),
-            title: Text(
-              'Язык',
-              style: TextStyle(color: theme.peerBubbleFg),
-            ),
-            subtitle: Text(
-              localeData.locale == 'ru' ? 'Русский' : 'English',
-              style: TextStyle(color: cs.onSurfaceVariant),
-            ),
-            trailing: SegmentedButton<String>(
-              segments: const [
-                ButtonSegment(value: 'en', label: Text('EN')),
-                ButtonSegment(value: 'ru', label: Text('RU')),
-              ],
-              selected: {localeData.locale},
-              showSelectedIcon: false,
-              onSelectionChanged: (set) {
-                if (set.isNotEmpty) {
-                  final locale = AppLocale.fromCode(set.first);
-                  ref.read(localeNotifierProvider.notifier).setLocale(locale);
-                }
-              },
+          Material(
+            color: Colors.transparent,
+            child: ListTile(
+              leading: Icon(Icons.translate_rounded, color: theme.peerBubbleFg),
+              title: Text(
+                'Язык',
+                style: TextStyle(color: theme.peerBubbleFg),
+              ),
+              subtitle: Text(
+                localeData.locale == 'ru' ? 'Русский' : 'English',
+                style: TextStyle(color: cs.onSurfaceVariant),
+              ),
+              trailing: SegmentedButton<String>(
+                segments: const [
+                  ButtonSegment(value: 'en', label: Text('EN')),
+                  ButtonSegment(value: 'ru', label: Text('RU')),
+                ],
+                selected: {localeData.locale},
+                showSelectedIcon: false,
+                onSelectionChanged: (set) {
+                  if (set.isNotEmpty) {
+                    final locale = AppLocale.fromCode(set.first);
+                    ref.read(localeNotifierProvider.notifier).setLocale(locale);
+                  }
+                },
+              ),
             ),
           ),
         ],
