@@ -6334,6 +6334,7 @@ class _DateDivider extends StatelessWidget {
 // Telegram Style Compose Bar
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../../../../localization/app_localizations.dart';
 
 class ComposeBar extends StatefulWidget {
@@ -6418,17 +6419,29 @@ class _ComposeBarState extends State<ComposeBar> {
 
                     // Поле ввода
                     Expanded(
-                      child: TextField(
-                        controller: _controller,
-                        enabled: widget.enabled && !widget.sending,
-                        minLines: 1,
-                        maxLines: 5,
-                        decoration: InputDecoration(
-                          hintText: t.translate('message_placeholder'),
-                          border: InputBorder.none,
-                          enabledBorder: InputBorder.none,
-                          focusedBorder: InputBorder.none,
-                          contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                      child: CallbackShortcuts(
+                        bindings: {
+                          const SingleActivator(LogicalKeyboardKey.enter): () {
+                            _handleSend();
+                          },
+                          const SingleActivator(LogicalKeyboardKey.numpadEnter): () {
+                            _handleSend();
+                          },
+                        },
+                        child: TextField(
+                          controller: _controller,
+                          enabled: widget.enabled && !widget.sending,
+                          minLines: 1,
+                          maxLines: 5,
+                          textInputAction: TextInputAction.send,
+                          onSubmitted: (_) => _handleSend(),
+                          decoration: InputDecoration(
+                            hintText: t.translate('message_placeholder'),
+                            border: InputBorder.none,
+                            enabledBorder: InputBorder.none,
+                            focusedBorder: InputBorder.none,
+                            contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                          ),
                         ),
                       ),
                     ),
