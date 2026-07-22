@@ -173,6 +173,7 @@ class ChatPreview {
           contactRequest['localDisplayName'] as String? ??
           '';
       id = contactRequest['contactRequestId'] as int?;
+      embeddedContactRequestId = id;
       final img = profile?['image'] as String?;
       avatar = _decodeImage(img);
     } else if (contact != null) {
@@ -210,7 +211,7 @@ class ChatPreview {
 
     return ChatPreview(
       chatRef: type == 'contactRequest'
-          ? '<@${id ?? '?'}'
+          ? '@c_${id ?? '?'}'
           : (type == 'group' ? '#${id ?? '?'}' : '@${id ?? '?'}'),
       chatType: type,
       displayName: name,

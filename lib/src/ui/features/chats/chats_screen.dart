@@ -76,7 +76,7 @@ class _ChatRow extends StatelessWidget {
     final tt = Theme.of(context).textTheme;
     final t = AppLocalizations.of(context);
     final showSubtitle = chat.lastMessage.isNotEmpty;
-    final canOpen = chat.chatType == 'contact' || chat.chatType == 'group';
+    final canOpen = chat.chatType == 'contact' || chat.chatType == 'group' || chat.chatType == 'contactRequest';
 
     return ListTile(
       contentPadding:
