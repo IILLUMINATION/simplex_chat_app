@@ -5805,6 +5805,7 @@ class ChatState {
     this.sending = false,
     this.error,
     this.messagingReady = true,
+    this.contactRequestId,
   });
 
   final bool loading;
@@ -5812,6 +5813,7 @@ class ChatState {
   final bool sending;
   final String? error;
   final bool messagingReady;
+  final int? contactRequestId;
 
   ChatState copyWith({
     bool? loading,
@@ -5820,6 +5822,7 @@ class ChatState {
     String? error,
     bool clearError = false,
     bool? messagingReady,
+    int? contactRequestId,
   }) =>
       ChatState(
         loading: loading ?? this.loading,
@@ -5827,6 +5830,7 @@ class ChatState {
         sending: sending ?? this.sending,
         error: clearError ? null : (error ?? this.error),
         messagingReady: messagingReady ?? this.messagingReady,
+        contactRequestId: contactRequestId ?? this.contactRequestId,
       );
 }
 
@@ -5905,6 +5909,20 @@ class ChatController extends StateNotifier<ChatState> {
   void _scheduleRefresh() {
     _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 200), refresh);
+  }
+
+  Future<void> acceptRequest(int contactRequestId) async {
+    final ok = await _service.acceptContactRequest(contactRequestId);
+    if (ok) {
+      await refresh();
+    }
+  }
+
+  Future<void> rejectRequest(int contactRequestId) async {
+    final ok = await _service.rejectContactRequest(contactRequestId);
+    if (ok) {
+      await refresh();
+    }
   }
 
   Future<bool> sendText(String text) async {
@@ -6100,11 +6118,36 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       body: Column(
         children: [
           Expanded(child: _body(context, state, controller)),
-          ComposeBar(
-            enabled: state.messagingReady,
-            sending: state.sending,
-            onSend: controller.sendText,
-          ),
+          if (widget.chat.chatType == 'contactRequest' && widget.chat.embeddedContactRequestId != null)
+            Container(
+              padding: const EdgeInsets.all(16),
+              color: cs.surfaceContainer,
+              child: Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () => controller.rejectRequest(widget.chat.embeddedContactRequestId!),
+                      icon: const Icon(Icons.close_rounded, color: Colors.red),
+                      label: const Text('Отклонить', style: TextStyle(color: Colors.red)),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: () => controller.acceptRequest(widget.chat.embeddedContactRequestId!),
+                      icon: const Icon(Icons.check_rounded),
+                      label: const Text('Принять'),
+                    ),
+                  ),
+                ],
+              ),
+            )
+          else
+            ComposeBar(
+              enabled: state.messagingReady,
+              sending: state.sending,
+              onSend: controller.sendText,
+            ),
         ],
       ),
     );

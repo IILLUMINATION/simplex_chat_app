@@ -135,11 +135,36 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       body: Column(
         children: [
           Expanded(child: _body(context, state, controller)),
-          ComposeBar(
-            enabled: state.messagingReady,
-            sending: state.sending,
-            onSend: controller.sendText,
-          ),
+          if (widget.chat.chatType == 'contactRequest' && widget.chat.embeddedContactRequestId != null)
+            Container(
+              padding: const EdgeInsets.all(16),
+              color: cs.surfaceContainer,
+              child: Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () => controller.rejectRequest(widget.chat.embeddedContactRequestId!),
+                      icon: const Icon(Icons.close_rounded, color: Colors.red),
+                      label: const Text('Отклонить', style: TextStyle(color: Colors.red)),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: () => controller.acceptRequest(widget.chat.embeddedContactRequestId!),
+                      icon: const Icon(Icons.check_rounded),
+                      label: const Text('Принять'),
+                    ),
+                  ),
+                ],
+              ),
+            )
+          else
+            ComposeBar(
+              enabled: state.messagingReady,
+              sending: state.sending,
+              onSend: controller.sendText,
+            ),
         ],
       ),
     );

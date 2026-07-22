@@ -23,6 +23,7 @@ class ChatState {
     this.sending = false,
     this.error,
     this.messagingReady = true,
+    this.contactRequestId,
   });
 
   final bool loading;
@@ -30,6 +31,7 @@ class ChatState {
   final bool sending;
   final String? error;
   final bool messagingReady;
+  final int? contactRequestId;
 
   ChatState copyWith({
     bool? loading,
@@ -38,6 +40,7 @@ class ChatState {
     String? error,
     bool clearError = false,
     bool? messagingReady,
+    int? contactRequestId,
   }) =>
       ChatState(
         loading: loading ?? this.loading,
@@ -45,6 +48,7 @@ class ChatState {
         sending: sending ?? this.sending,
         error: clearError ? null : (error ?? this.error),
         messagingReady: messagingReady ?? this.messagingReady,
+        contactRequestId: contactRequestId ?? this.contactRequestId,
       );
 }
 
@@ -123,6 +127,20 @@ class ChatController extends StateNotifier<ChatState> {
   void _scheduleRefresh() {
     _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 200), refresh);
+  }
+
+  Future<void> acceptRequest(int contactRequestId) async {
+    final ok = await _service.acceptContactRequest(contactRequestId);
+    if (ok) {
+      await refresh();
+    }
+  }
+
+  Future<void> rejectRequest(int contactRequestId) async {
+    final ok = await _service.rejectContactRequest(contactRequestId);
+    if (ok) {
+      await refresh();
+    }
   }
 
   Future<bool> sendText(String text) async {
