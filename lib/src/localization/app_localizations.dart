@@ -89,6 +89,11 @@ class AppLocalizations {
     'send_error_contact_not_active': 'Контакт не активен',
     'send_error_no_response': 'Нет ответа от ядра',
     'send_error_parse': 'Ошибка разбора ответа',
+    'message_placeholder': 'Сообщение',
+    'chat_load_error': 'Не удалось загрузить сообщения',
+    'profile_section': 'Профиль',
+    'profile_no_profile': 'Профиль не создан',
+    'language_label': 'Язык',
 
     // Connect screen
     'core_not_initialized_yet': 'Ядро ещё не инициализировано',
@@ -250,6 +255,11 @@ class AppLocalizations {
     'send_error_contact_not_active': 'Contact is not active',
     'send_error_no_response': 'No response from core',
     'send_error_parse': 'Could not parse server response',
+    'message_placeholder': 'Message',
+    'chat_load_error': 'Failed to load messages',
+    'profile_section': 'Profile',
+    'profile_no_profile': 'No profile created',
+    'language_label': 'Language',
 
     // Connect screen
     'core_not_initialized_yet': 'Core is not initialized yet',

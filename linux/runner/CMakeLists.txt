@@ -34,4 +34,6 @@ if(EXISTS "${SIMPLEX_LIB_DIR}")
     BUILD_RPATH "${SIMPLEX_LIB_DIR}"
     INSTALL_RPATH "\$ORIGIN/lib"
   )
+  # Линк напрямую, чтобы символы SQLCipher загрузились первыми и переопределили системный sqlite3
+  target_link_libraries(${BINARY_NAME} PRIVATE "${SIMPLEX_LIB_DIR}/libsimplex.so")
 endif()

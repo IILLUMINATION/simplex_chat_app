@@ -8,7 +8,7 @@ from pathlib import Path
 EXTENSIONS = {'.dart', '.py', '.js', '.ts', '.java', '.kt', '.swift', '.h', '.hpp', '.c', '.cpp', '.rs', '.go', '.yaml', '.yml', '.json', '.md', '.txt', '.sql', '.sh', '.html', '.css'}
 
 # Папки для игнорирования
-IGNORE_DIRS = {'.git', '.dart_tool', '.idea', 'build', 'android', 'ios', 'linux', 'macos', 'windows', 'web', '__pycache__', 'node_modules'}
+IGNORE_DIRS = {'.git', '.dart_tool', '.idea', 'build', 'android', 'ios', 'linux', 'macos', 'windows', 'web', '__pycache__', 'node_modules', 'simplex-chat', 'simplex_cli_extracted', 'example', '.vscode', '.qwen'}
 
 def collect_code(root_dir: str, output_file: str):
     root = Path(root_dir)
@@ -29,8 +29,8 @@ def collect_code(root_dir: str, output_file: str):
         if path.suffix.lower() not in EXTENSIONS:
             continue
         
-        # Пропускаем lock файлы и сгенерированные
-        if path.name.endswith('.lock') or path.name == 'pubspec.lock':
+        # Пропускаем lock файлы, сгенерированные, сам скрипт сбора и файл вывода
+        if path.name.endswith('.lock') or path.name == 'pubspec.lock' or path.name == 'collect_code.py' or path.name == output.name:
             continue
             
         try:
