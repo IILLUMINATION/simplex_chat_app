@@ -5,15 +5,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'src/localization/app_localizations.dart';
 import 'src/providers/locale_provider.dart';
 import 'src/providers/theme_provider.dart';
-import 'src/service/tanglex_service.dart';
 import 'src/ui/home_screen.dart';
 
-// Global provider so all screens share the same TanglexService
-final tanglexServiceProvider = Provider<TanglexService>((ref) {
-  final service = TanglexService();
-  ref.onDispose(() => service.dispose());
-  return service;
-});
+export 'src/providers/core_provider.dart' show tanglexServiceProvider;
 
 // Global notifier to trigger the FAB action from HomeScreen -> ChatsScreen
 class _FabActionNotifier extends ChangeNotifier {

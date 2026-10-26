@@ -22,13 +22,13 @@ class PinnedMessage {
   });
 
   Map<String, dynamic> toJson() => {
-        'chatRef': chatRef,
-        'key': key,
-        'text': text,
-        'imageFilePath': imageFilePath,
-        'timeStr': timeStr,
-        'pinnedAt': pinnedAt.toIso8601String(),
-      };
+    'chatRef': chatRef,
+    'key': key,
+    'text': text,
+    'imageFilePath': imageFilePath,
+    'timeStr': timeStr,
+    'pinnedAt': pinnedAt.toIso8601String(),
+  };
 
   static PinnedMessage fromJson(Map<String, dynamic> json) {
     return PinnedMessage(
@@ -108,8 +108,10 @@ class PinStore {
 
   Future<void> _save() async {
     final f = await _file();
-    final data =
-        _pinned.values.expand((v) => v).map((p) => p.toJson()).toList();
+    final data = _pinned.values
+        .expand((v) => v)
+        .map((p) => p.toJson())
+        .toList();
     await f.writeAsString(jsonEncode(data));
   }
 

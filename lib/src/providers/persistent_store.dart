@@ -88,6 +88,8 @@ class ChatPreview {
     this.lastFromMe = false,
     this.connStatusType,
     this.embeddedContactRequestId,
+    this.muted = false,
+    this.pinned = false,
   });
 
   final String chatRef; // e.g. "@1" or "#1"
@@ -106,9 +108,16 @@ class ChatPreview {
   /// [Contact.contactRequestId] — incoming address request tied to a direct chat row.
   final int? embeddedContactRequestId;
 
+  /// Notifications are off (`enableNtfs` is `none`/`mentions`).
+  final bool muted;
+
+  /// Chat is marked as favorite (rendered as pinned).
+  final bool pinned;
+
   /// Whether the user can send messages in this direct chat (groups always true).
   bool get isMessagingReady {
-    if (chatType != 'contact') return true;
+    if (chatType == 'group') return true;
+    if (chatType != 'contact') return false;
     if (contactStatus != null && contactStatus != 'active') return false;
     final t = connStatusType;
     if (t == null) return true;
@@ -164,6 +173,8 @@ class ChatPreview {
     Uint8List? avatar;
     String? connStatusType;
     int? embeddedContactRequestId;
+    bool muted = false;
+    bool pinned = false;
 
     if (chatType == 'contactRequest' && contactRequest != null) {
       type = 'contactRequest';
@@ -190,6 +201,8 @@ class ChatPreview {
       final activeConn = contact['activeConn'] as Map<String, dynamic>?;
       connStatusType = _connStatusTypeFromActiveConn(activeConn);
       embeddedContactRequestId = contact['contactRequestId'] as int?;
+      final settings = contact['chatSettings'] as Map<String, dynamic>?;
+      (muted, pinned) = _chatSettingsFlags(settings);
     } else if (group != null) {
       type = 'group';
       name =
@@ -197,6 +210,8 @@ class ChatPreview {
           group['localDisplayName'] as String? ??
           '';
       id = group['groupId'] as int?;
+      final settings = group['chatSettings'] as Map<String, dynamic>?;
+      (muted, pinned) = _chatSettingsFlags(settings);
     } else if (chatType == 'contactConnection') {
       type = 'contactConnection';
       final cc = chatInfo['contactConnection'] as Map<String, dynamic>?;
@@ -224,8 +239,19 @@ class ChatPreview {
       lastFromMe: lastFromMe,
       connStatusType: connStatusType,
       embeddedContactRequestId: embeddedContactRequestId,
+      muted: muted,
+      pinned: pinned,
     );
   }
+}
+
+/// SimpleX has no "pinned" flag; favorites play that role in the UI.
+(bool muted, bool pinned) _chatSettingsFlags(Map<String, dynamic>? settings) {
+  if (settings == null) return (false, false);
+  final ntfs = settings['enableNtfs'];
+  final ntfsType = ntfs is Map ? ntfs['type'] as String? : null;
+  final favorite = settings['favorite'] == true;
+  return (ntfsType != null && ntfsType != 'all', favorite);
 }
 
 Map<String, dynamic>? _pickLatestChatItem(List items) {

@@ -57,7 +57,8 @@ class _ConnectScreenState extends ConsumerState<ConnectScreen>
     }
 
     setState(() => _connecting = true);
-    final success = await service.connectViaLink(link);
+    final result = await service.connectViaLink(link);
+    final success = result.ok;
     setState(() => _connecting = false);
 
     if (mounted) {

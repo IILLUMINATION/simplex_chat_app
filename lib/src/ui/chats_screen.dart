@@ -253,7 +253,8 @@ class _ChatsScreenState extends ConsumerState<ChatsScreen> {
               final link = controller.text.trim();
               if (link.isEmpty) return;
               final service = ref.read(tanglexServiceProvider);
-              final ok = await service.connectViaLink(link);
+              final result = await service.connectViaLink(link);
+              final ok = result.ok;
               if (mounted) {
                 Navigator.pop(ctx);
                 ScaffoldMessenger.of(context).showSnackBar(

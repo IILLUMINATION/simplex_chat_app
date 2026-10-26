@@ -9,6 +9,7 @@ import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../data/connect_plan.dart';
 import '../ffi/tanglex_native.dart';
 import '../providers/persistent_store.dart';
 
@@ -217,9 +218,10 @@ class TanglexService {
       await _native.startEventLoop(_receivePort!.sendPort);
       _appendLog('Event loop started.');
 
-      await _setAppFilePaths();
-
+      // sendCommand() refuses to talk to the core while _isInitialized is
+      // false, and _setAppFilePaths() goes through it.
       _isInitialized = true;
+      await _setAppFilePaths();
       await _ensureActiveUser();
       await _startChatIfPossible();
     } catch (error, stackTrace) {
@@ -228,6 +230,7 @@ class TanglexService {
       // FIX: ранее при ошибке ReceivePort и event subscription оставались
       // живыми → утечка native handles и потенциальная блокировка БД при
       // повторной попытке init.
+      _isInitialized = false;
       await _eventSubscription?.cancel();
       _eventSubscription = null;
       _receivePort?.close();
@@ -770,6 +773,77 @@ class TanglexService {
     }
   }
 
+  /// Update an existing profile (APIUpdateProfile).
+  Future<bool> updateUserProfile({
+    required int userId,
+    required String displayName,
+    String fullName = '',
+    String? shortDescr,
+  }) async {
+    final profile = {
+      'displayName': displayName,
+      'fullName': fullName,
+      'shortDescr': shortDescr,
+      'image': null,
+      'contactLink': null,
+      'peerType': null,
+      'preferences': null,
+    };
+    final resp = await sendCommand('/_profile $userId ${_jsonCompact(profile)}');
+    if (resp == null) return false;
+    try {
+      final json = Map<String, dynamic>.from(_decodeJson(resp));
+      if (json.containsKey('error')) return false;
+      final result = json['result'] as Map<String, dynamic>?;
+      final type = result?['type'];
+      if (type != 'userProfileUpdated' && type != 'userProfileNoChange') {
+        return false;
+      }
+      final updated = result?['user'] as Map<String, dynamic>?;
+      final updatedProfile = updated?['profile'];
+      if (updated != null && updatedProfile is Map) {
+        await saveProfileData(
+          ProfileData(
+            displayName: updatedProfile['displayName'] as String? ?? displayName,
+            fullName: updatedProfile['fullName'] as String? ?? fullName,
+            shortDescr: updatedProfile['shortDescr'] as String? ?? '',
+            userId: updated['userId'] as int?,
+            agentUserId: updated['agentUserId'] as String?,
+            userContactId: updated['userContactId'] as int?,
+            localDisplayName: updated['localDisplayName'] as String?,
+          ),
+        );
+      }
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Mute/unmute and (un)pin a chat (APISetChatSettings).
+  Future<bool> setChatSettings(
+    String chatRef, {
+    required bool muted,
+    required bool pinned,
+  }) async {
+    final settings = {
+      'enableNtfs': {'type': muted ? 'none' : 'all'},
+      'favorite': pinned,
+    };
+    final resp = await sendCommand(
+      '/_settings $chatRef ${_jsonCompact(settings)}',
+    );
+    if (resp == null) return false;
+    try {
+      final json = Map<String, dynamic>.from(_decodeJson(resp));
+      if (json.containsKey('error')) return false;
+      final result = json['result'] as Map<String, dynamic>?;
+      return result != null && result['type'] != 'chatCmdError';
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// Get current user info
   Future<Map<String, dynamic>?> getUser() async {
     final resp = await sendCommand('/user');
@@ -968,38 +1042,76 @@ class TanglexService {
   }
 
   /// Connect to a contact via their link
-  Future<bool> connectViaLink(String link) async {
-    // Check if core is initialized
+  /// Resolve a link or name through the core's connection plan, then connect.
+  ///
+  /// The legacy `/connect` command only accepts full links; the plan command
+  /// is what the official clients use, and it also resolves short links and
+  /// SimpleX names. The resolved full link is then passed to `/connect`.
+  Future<ConnectOutcome> connectViaLink(String link) async {
     if (!_isInitialized) {
-      _appendLog('Error: Core not initialized');
-      return false;
+      _appendLog('connectViaLink: core not initialized');
+      return const ConnectOutcome.error('The core is not initialized.');
+    }
+    final userId = await _getActiveUserId();
+    if (userId == null) {
+      return const ConnectOutcome.error('Create a profile first.');
     }
 
-    final resp = await sendCommand('/connect $link');
-    if (resp == null) return false;
+    final target = link.trim();
+    if (target.isEmpty) {
+      return const ConnectOutcome.error('Paste a SimpleX link.');
+    }
+    if (looksLikeShortLinkKey(target)) {
+      return const ConnectOutcome.error(shortLinkKeyHint);
+    }
+
+    final planResp = await sendCommand('/_connect plan $userId $target');
+    if (planResp == null) {
+      return const ConnectOutcome.error('No response from the core.');
+    }
+    ConnectPlan plan;
+    try {
+      plan = parseConnectPlanResponse(
+        Map<String, dynamic>.from(_decodeJson(planResp)),
+      );
+    } catch (e) {
+      _appendLog('connectViaLink plan parse error: $e');
+      return const ConnectOutcome.error('Unexpected response from the core.');
+    }
+    if (!plan.canConnect) {
+      _appendLog('connectViaLink plan: ${plan.action} ${plan.message}');
+      return ConnectOutcome.error(plan.message ?? 'Could not connect.');
+    }
+
+    final resp = await sendCommand(
+      '/_connect $userId incognito=off ${plan.fullLink}',
+    );
+    if (resp == null) {
+      return const ConnectOutcome.error('No response from the core.');
+    }
     try {
       final json = Map<String, dynamic>.from(_decodeJson(resp));
-
-      // Check for error
-      if (json.containsKey('error')) {
-        final errorObj = json['error'];
-        final errorType = errorObj is Map ? errorObj['errorType'] : null;
-        final message = errorType is Map ? errorType['message'] : errorObj;
-        _appendLog('connectViaLink error: $message');
-        return false;
+      final error = json['error'];
+      if (error != null) {
+        final code = coreErrorCode(error);
+        _appendLog('connectViaLink error: $code $error');
+        return ConnectOutcome.error(connectErrorMessage(code));
       }
-
       final result = json['result'] as Map<String, dynamic>?;
       if (result == null) {
         _appendLog('connectViaLink: empty result');
-        return false;
+        return const ConnectOutcome.error('Unexpected response from the core.');
       }
-
+      if (result['type'] == 'chatCmdError') {
+        final code = coreErrorCode(result['chatError']);
+        _appendLog('connectViaLink chatCmdError: $code $result');
+        return ConnectOutcome.error(connectErrorMessage(code));
+      }
       _appendLog('connectViaLink success, type=${result['type']}');
-      return true;
+      return const ConnectOutcome.success();
     } catch (e) {
       _appendLog('connectViaLink parse error: $e');
-      return false;
+      return const ConnectOutcome.error('Unexpected response from the core.');
     }
   }
 

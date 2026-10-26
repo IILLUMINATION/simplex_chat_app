@@ -30,3 +30,10 @@ linter:
 analyzer:
   exclude:
     - local_plugins/**
+    - build/**
+    - android/**
+    - ios/**
+    - web/**
+    - windows/**
+    - macos/**
+    - linux/**
