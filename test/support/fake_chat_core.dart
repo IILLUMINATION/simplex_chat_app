@@ -1,8 +1,11 @@
 import 'dart:async';
+import 'dart:convert';
 
+import 'package:image/image.dart' as img;
 import 'package:tanglex_chat/src/data/account_models.dart';
 import 'package:tanglex_chat/src/data/chat_core.dart';
 import 'package:tanglex_chat/src/data/connect_plan.dart';
+import 'package:tanglex_chat/src/data/formatted_text.dart';
 import 'package:tanglex_chat/src/providers/persistent_store.dart';
 
 /// In-memory [ChatCore] for widget tests and golden snapshots.
@@ -13,8 +16,10 @@ class FakeChatCore implements ChatCore {
     required this.now,
     List<Map<String, dynamic>>? users,
     int? activeUserId,
+    Map<String, List<MessageSpan>>? markdown,
     this.address = 'simplex:/contact#/?v=2-7&smp=smp7.simplex.im%2Ftest#/Alex',
   }) : messages = messages ?? {},
+       markdown = markdown ?? {},
        users = users ?? [_defaultUser()],
        _activeUserId = activeUserId;
 
@@ -22,6 +27,9 @@ class FakeChatCore implements ChatCore {
   final Map<String, List<Map<String, dynamic>>> messages;
   final DateTime now;
   final List<Map<String, dynamic>> users;
+
+  /// What `chat_parse_markdown` would answer for a given text.
+  final Map<String, List<MessageSpan>> markdown;
   final String? address;
   int? _activeUserId;
 
@@ -32,6 +40,20 @@ class FakeChatCore implements ChatCore {
   bool failSend = false;
   bool failConnect = false;
   final List<String> sentTexts = [];
+  final List<int?> sentQuotedIds = [];
+  final List<String> sentImagePaths = [];
+  final List<String> sentFiles = [];
+  final List<String> sentFileCaptions = [];
+  final List<int> receivedFileIds = [];
+  final List<String> sentImageCaptions = [];
+  final List<({String chatRef, int itemId, String emoji, bool add})>
+  reactionChanges = [];
+  final List<({String chatRef, int itemId, String text})> edits = [];
+  final List<({String chatRef, int itemId, bool forEveryone})> deletions = [];
+  final List<({String toChatRef, String fromChatRef, int itemId})> forwards =
+      [];
+  final List<({int requestId, bool incognito})> acceptedRequests = [];
+  final List<int> rejectedRequests = [];
   final List<String> readChats = [];
   final List<String> connectedLinks = [];
   final List<({String chatRef, bool muted})> muteChanges = [];
@@ -54,6 +76,9 @@ class FakeChatCore implements ChatCore {
     'result': {'type': type},
   });
 
+  /// Emits a bare core event (the payload is not needed by list refreshes).
+  void emitEvent(String type) => _emit(type);
+
   @override
   bool get isInitialized => initialized;
 
@@ -75,18 +100,221 @@ class FakeChatCore implements ChatCore {
   }) async => List<Map<String, dynamic>>.from(messages[chatRef] ?? const []);
 
   @override
+  Future<List<MessageSpan>?> parseMarkdown(String text) async => markdown[text];
+
+  @override
   Future<bool> sendMessage(
     String chatRef,
     String text, {
     int? quotedItemId,
-  }) async {
-    if (failSend) return false;
+  }) async {    if (failSend) return false;
     sentTexts.add(text);
+    sentQuotedIds.add(quotedItemId);
     final at = now.add(Duration(seconds: sentTexts.length));
+    String? quoteText;
+    if (quotedItemId != null) {
+      for (final raw in messages[chatRef] ?? const []) {
+        final meta = raw['meta'];
+        if (meta is Map && meta['itemId'] == quotedItemId) {
+          quoteText = meta['itemText'] as String?;
+        }
+      }
+    }
     messages
         .putIfAbsent(chatRef, () => [])
-        .add(textItem(text: text, time: at, fromMe: true, status: 'sndSent'));
+        .add(
+          textItem(
+            text: text,
+            time: at,
+            fromMe: true,
+            status: 'sndSent',
+            quoteText: quoteText,
+          ),
+        );
     _emit('newChatItems');
+    return true;
+  }
+
+  @override
+  Future<bool> sendImages(
+    String chatRef,
+    List<OutgoingImage> images, {
+    String text = '',
+    int? quotedItemId,
+  }) async {
+    if (failSend || images.isEmpty) return false;
+    sentImagePaths.addAll(images.map((image) => image.filePath));
+    sentImageCaptions.add(text);
+    sentQuotedIds.add(quotedItemId);
+    final at = now.add(Duration(seconds: sentImagePaths.length));
+    messages
+        .putIfAbsent(chatRef, () => [])
+        .add(
+          imageItem(
+            time: at,
+            fileName: images.first.filePath.split('/').last,
+            size: images.first.previewBytes.length,
+            fromMe: true,
+          ),
+        );
+    _emit('newChatItems');
+    return true;
+  }
+
+  @override
+  Future<bool> sendFile(
+    String chatRef,
+    String filePath, {
+    String text = '',
+    int? quotedItemId,
+  }) async {
+    if (failSend) return false;
+    sentFiles.add(filePath);
+    sentFileCaptions.add(text);
+    sentQuotedIds.add(quotedItemId);
+    final at = now.add(Duration(seconds: sentFiles.length));
+    messages
+        .putIfAbsent(chatRef, () => [])
+        .add(
+          documentItem(
+            time: at,
+            fileName: filePath.split('/').last,
+            size: 1024,
+            fromMe: true,
+            fileStatus: 'sndComplete',
+            filePath: filePath,
+          ),
+        );
+    _emit('newChatItems');
+    return true;
+  }
+
+  @override
+  Future<bool> receiveFile(int fileId) async {
+    if (failSend) return false;
+    receivedFileIds.add(fileId);
+    return true;
+  }
+
+  @override
+  Future<bool> setReaction(
+    String chatRef,
+    int itemId,
+    String emoji, {
+    required bool add,
+  }) async {
+    reactionChanges.add((
+      chatRef: chatRef,
+      itemId: itemId,
+      emoji: emoji,
+      add: add,
+    ));
+    for (final raw in messages[chatRef] ?? const []) {
+      final meta = raw['meta'];
+      if (meta is! Map || meta['itemId'] != itemId) continue;
+      final reactions = [
+        for (final entry in (raw['reactions'] as List? ?? const []))
+          if (entry is Map &&
+              (entry['reaction'] as Map?)?['emoji'] != emoji)
+            entry,
+      ];
+      if (add) {
+        reactions.add({
+          'reaction': {'type': 'emoji', 'emoji': emoji},
+          'userReacted': true,
+          'totalReacted': 1,
+        });
+      }
+      raw['reactions'] = reactions;
+    }
+    _emit('chatItemReaction');
+    return true;
+  }
+
+  @override
+  Future<bool> editMessage(String chatRef, int itemId, String text) async {
+    if (failSend) return false;
+    edits.add((chatRef: chatRef, itemId: itemId, text: text));
+    for (final raw in messages[chatRef] ?? const []) {
+      final meta = raw['meta'];
+      if (meta is! Map || meta['itemId'] != itemId) continue;
+      meta['itemText'] = text;
+      meta['itemEdited'] = true;
+      final content = raw['content'];
+      if (content is Map) {
+        final msgContent = content['msgContent'];
+        if (msgContent is Map) msgContent['text'] = text;
+      }
+    }
+    _emit('chatItemUpdated');
+    return true;
+  }
+
+  @override
+  Future<bool> deleteMessage(
+    String chatRef,
+    int itemId, {
+    required bool forEveryone,
+  }) async {
+    if (failSend) return false;
+    deletions.add((chatRef: chatRef, itemId: itemId, forEveryone: forEveryone));
+    messages[chatRef]?.removeWhere(
+      (raw) => (raw['meta'] as Map?)?['itemId'] == itemId,
+    );
+    _emit('chatItemsDeleted');
+    return true;
+  }
+
+  @override
+  Future<bool> forwardMessages(
+    String toChatRef,
+    String fromChatRef,
+    List<int> itemIds,
+  ) async {
+    if (failSend || itemIds.isEmpty) return false;
+    for (final itemId in itemIds) {
+      forwards.add((toChatRef: toChatRef, fromChatRef: fromChatRef, itemId: itemId));
+      final source = messages[fromChatRef]?.firstWhere(
+        (raw) => (raw['meta'] as Map?)?['itemId'] == itemId,
+        orElse: () => const <String, dynamic>{},
+      );
+      final text = (source?['meta'] as Map?)?['itemText'];
+      if (text is String && text.isNotEmpty) {
+        final sourceName = chats
+            .where((chat) => chat.chatRef == fromChatRef)
+            .map((chat) => chat.displayName)
+            .firstOrNull;
+        messages
+            .putIfAbsent(toChatRef, () => [])
+            .add(
+              textItem(
+                text: text,
+                time: now.add(Duration(seconds: forwards.length)),
+                fromMe: true,
+                forwarded: true,
+                forwardedFrom: sourceName ?? '',
+              ),
+            );
+      }
+    }
+    _emit('newChatItems');
+    return true;
+  }
+
+  @override
+  Future<bool> acceptContactRequest(
+    int requestId, {
+    bool incognito = false,
+  }) async {
+    acceptedRequests.add((requestId: requestId, incognito: incognito));
+    _emit('contactConnected');
+    return true;
+  }
+
+  @override
+  Future<bool> rejectContactRequest(int requestId) async {
+    rejectedRequests.add(requestId);
+    _emit('contactRequestRejected');
     return true;
   }
 
@@ -151,6 +379,7 @@ class FakeChatCore implements ChatCore {
     required String displayName,
     String fullName = '',
     String? shortDescr,
+    String? image,
   }) async {
     for (final user in users) {
       if (user['userId'] != userId) continue;
@@ -158,6 +387,7 @@ class FakeChatCore implements ChatCore {
         'displayName': displayName,
         'fullName': fullName,
         'shortDescr': shortDescr ?? '',
+        'image': ?image,
       };
       _emit('userProfileUpdated');
       return true;
@@ -207,6 +437,11 @@ class FakeChatCore implements ChatCore {
         embeddedContactRequestId: old.embeddedContactRequestId,
         muted: muted,
         pinned: pinned,
+        fullName: old.fullName,
+        shortDescr: old.shortDescr,
+        description: old.description,
+        memberCount: old.memberCount,
+        quantumResistant: old.quantumResistant,
       );
     }
     _emit('chatItemUpdated');
@@ -222,7 +457,15 @@ Map<String, dynamic> textItem({
   bool fromMe = false,
   String status = 'sndSent',
   String? quoteText,
-  String? quoteSender,
+  String quoteDir = 'directRcv',
+  List<Map<String, dynamic>> reactions = const [],
+  List<Map<String, dynamic>>? formattedText,
+  List<Map<String, dynamic>>? quoteFormattedText,
+  bool edited = false,
+  bool editable = false,
+  bool deletable = false,
+  bool forwarded = false,
+  String forwardedFrom = '',
 }) {
   return {
     'chatDir': {'type': fromMe ? 'directSnd' : 'directRcv'},
@@ -231,18 +474,49 @@ Map<String, dynamic> textItem({
       'itemTs': time.toUtc().toIso8601String(),
       'itemText': text,
       'itemStatus': {'type': fromMe ? status : 'rcvNew'},
+      'itemEdited': edited,
+      'editable': editable,
+      'deletable': deletable,
+      if (forwarded)
+        'itemForwarded': {
+          'type': forwardedFrom.isEmpty ? 'unknown' : 'contact',
+          if (forwardedFrom.isNotEmpty) 'chatName': forwardedFrom,
+        },
     },
     'content': {
       'type': fromMe ? 'sndMsgContent' : 'rcvMsgContent',
       'msgContent': {'type': 'text', 'text': text},
     },
+    'reactions': reactions,
+    'formattedText': ?formattedText,
     if (quoteText != null)
       'quotedItem': {
+        'chatDir': {'type': quoteDir},
         'content': {'text': quoteText},
-        'senderName': quoteSender ?? '',
         'itemId': 1,
+        'formattedText': ?quoteFormattedText,
       },
   };
+}
+
+String? _demoImageUri;
+
+/// Deterministic 640x360 preview so photo bubbles exercise real bytes.
+String demoImageUri() {
+  final cached = _demoImageUri;
+  if (cached != null) return cached;
+  final picture = img.Image(width: 640, height: 360);
+  img.fill(picture, color: img.ColorRgb8(20, 32, 44));
+  for (var y = 0; y < picture.height; y++) {
+    for (var x = 0; x < picture.width; x++) {
+      final diagonal = (x + y) % 96;
+      if (diagonal < 3) {
+        img.drawPixel(picture, x, y, img.ColorRgb8(70, 120, 170));
+      }
+    }
+  }
+  final encoded = base64Encode(img.encodePng(picture));
+  return _demoImageUri = 'data:image/png;base64,$encoded';
 }
 
 Map<String, dynamic> imageItem({
@@ -250,6 +524,11 @@ Map<String, dynamic> imageItem({
   required String fileName,
   required int size,
   bool fromMe = false,
+  int? fileId,
+  String? fileStatus,
+  int? progress,
+  int? total,
+  String? filePath,
 }) {
   return {
     'chatDir': {'type': fromMe ? 'directSnd' : 'directRcv'},
@@ -261,9 +540,59 @@ Map<String, dynamic> imageItem({
     },
     'content': {
       'type': fromMe ? 'sndMsgContent' : 'rcvMsgContent',
-      'msgContent': {'type': 'image', 'text': ''},
+      'msgContent': {'type': 'image', 'text': '', 'image': demoImageUri()},
     },
-    'file': {'fileName': fileName, 'fileSize': size},
+    'file': {
+      'fileName': fileName,
+      'fileSize': size,
+      'fileId': ?fileId,
+      if (fileStatus != null)
+        'fileStatus': {
+          'type': fileStatus,
+          (fromMe ? 'sndProgress' : 'rcvProgress'): ?progress,
+          (fromMe ? 'sndTotal' : 'rcvTotal'): ?total,
+        },
+      if (filePath != null) 'fileSource': {'filePath': filePath},
+    },
+  };
+}
+
+Map<String, dynamic> documentItem({
+  required DateTime time,
+  required String fileName,
+  required int size,
+  bool fromMe = false,
+  int? fileId,
+  String? fileStatus,
+  int? progress,
+  int? total,
+  String? filePath,
+  String text = '',
+}) {
+  return {
+    'chatDir': {'type': fromMe ? 'directSnd' : 'directRcv'},
+    'meta': {
+      'itemId': time.millisecondsSinceEpoch,
+      'itemTs': time.toUtc().toIso8601String(),
+      'itemText': text,
+      'itemStatus': {'type': fromMe ? 'sndSent' : 'rcvNew'},
+    },
+    'content': {
+      'type': fromMe ? 'sndMsgContent' : 'rcvMsgContent',
+      'msgContent': {'type': 'file', 'text': text},
+    },
+    'file': {
+      'fileName': fileName,
+      'fileSize': size,
+      'fileId': ?fileId,
+      if (fileStatus != null)
+        'fileStatus': {
+          'type': fileStatus,
+          (fromMe ? 'sndProgress' : 'rcvProgress'): ?progress,
+          (fromMe ? 'sndTotal' : 'rcvTotal'): ?total,
+        },
+      if (filePath != null) 'fileSource': {'filePath': filePath},
+    },
   };
 }
 
@@ -303,7 +632,7 @@ Map<String, List<Map<String, dynamic>>> demoConversations(DateTime day) {
         fromMe: true,
         status: 'sndRcvd',
         quoteText: 'Сначала дизайн-система, потом фичи.',
-        quoteSender: 'You',
+        quoteDir: 'directSnd',
       ),
       textItem(
         text: 'Записал: акцент, цвета бабблов, радиус, шрифт, обои.',
@@ -338,6 +667,10 @@ List<ChatPreview> demoChats(DateTime day) {
       lastMessage: 'Sent you the room keys, see you at 8',
       timestamp: _micros(at(14, 32)),
       unreadCount: 2,
+      connStatusType: 'ready',
+      fullName: 'Alice Bergström',
+      shortDescr: 'Coffee, keys and long walks',
+      quantumResistant: true,
     ),
     ChatPreview(
       chatRef: '#7',
@@ -346,6 +679,8 @@ List<ChatPreview> demoChats(DateTime day) {
       lastMessage: 'pushed the FFI bridge, tests green',
       timestamp: _micros(at(13, 5)),
       unreadCount: 12,
+      shortDescr: 'Build logs for TangleX',
+      memberCount: 12,
     ),
     ChatPreview(
       chatRef: '#8',
@@ -354,6 +689,8 @@ List<ChatPreview> demoChats(DateTime day) {
       lastMessage: 'Channels are now end-to-end encrypted',
       timestamp: _micros(at(12, 40)),
       muted: true,
+      shortDescr: 'Release notes from the SimpleX team',
+      memberCount: 1840,
     ),
     ChatPreview(
       chatRef: '#9',
@@ -362,6 +699,8 @@ List<ChatPreview> demoChats(DateTime day) {
       lastMessage: 'Backup finished, 41 GB uploaded',
       timestamp: _micros(at(11, 18)),
       pinned: true,
+      description: 'Only machines and their keepers here.',
+      memberCount: 4,
     ),
     ChatPreview(
       chatRef: '@2',
@@ -370,6 +709,8 @@ List<ChatPreview> demoChats(DateTime day) {
       lastMessage: 'Voice message · 0:24',
       timestamp: _micros(at(9, 2)),
       muted: true,
+      connStatusType: 'ready',
+      shortDescr: 'Designer',
     ),
     ChatPreview(
       chatRef: '#10',
@@ -385,6 +726,7 @@ List<ChatPreview> demoChats(DateTime day) {
       displayName: 'Dan',
       lastMessage: 'OK',
       timestamp: _micros(DateTime(day.year, day.month, day.day - 2, 18, 15)),
+      connStatusType: 'ready',
     ),
   ];
 }

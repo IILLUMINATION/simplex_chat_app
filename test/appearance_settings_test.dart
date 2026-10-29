@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:tanglex_chat/main_design.dart';
+import 'package:tanglex_chat/main.dart';
 import 'package:tanglex_chat/src/data/chat_providers.dart';
 import 'package:tanglex_chat/src/design/app_theme.dart';
 import 'package:tanglex_chat/src/shell/appearance_settings.dart';
@@ -32,7 +32,7 @@ void main() {
           chatCoreProvider.overrideWithValue(core),
           clockProvider.overrideWithValue(() => now),
         ],
-        child: const DesignPreviewApp(),
+        child: const TangleXApp(),
       ),
     );
     await tester.pumpAndSettle();

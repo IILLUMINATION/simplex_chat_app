@@ -283,35 +283,30 @@ void main() {
     expect(find.text('No results'), findsOneWidget);
   });
 
-  testWidgets('details panel mutes the chat', (tester) async {
+  testWidgets('details panel mutes the chat from the notifications switch', (
+    tester,
+  ) async {
     final core = await _pumpShell(tester);
 
-    await tester.tap(
-      find.descendant(
-        of: find.byType(ConversationPanel),
-        matching: find.byIcon(Icons.info_outline),
-      ),
-    );
+    await tester.tap(find.byKey(const ValueKey('conversation-header')));
     await tester.pumpAndSettle();
 
+    final panel = find.byType(DetailsPanel);
     expect(
-      find.descendant(of: find.byType(DetailsPanel), matching: find.text('Mute')),
+      find.descendant(of: panel, matching: find.text('Notifications')),
       findsOneWidget,
     );
-
-    await tester.tap(
-      find.descendant(of: find.byType(DetailsPanel), matching: find.text('Mute')),
+    final toggle = find.descendant(
+      of: panel,
+      matching: find.byType(Switch),
     );
+    expect(tester.widget<Switch>(toggle).value, isTrue);
+
+    await tester.tap(toggle);
     await tester.pumpAndSettle();
 
     expect(core.muteChanges, [(chatRef: '@1', muted: true)]);
-    expect(
-      find.descendant(
-        of: find.byType(DetailsPanel),
-        matching: find.text('Unmute'),
-      ),
-      findsOneWidget,
-    );
+    expect(tester.widget<Switch>(toggle).value, isFalse);
   });
 
   testWidgets('no profiles shows onboarding and creates the first one', (

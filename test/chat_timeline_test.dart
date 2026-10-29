@@ -85,6 +85,93 @@ void main() {
     expect(messages[2].firstInGroup, isTrue);
   });
 
+  test('v7 chatBanner items are not rendered as messages', () {
+    final banner = {
+      'chatDir': {'type': 'directSnd'},
+      'meta': {
+        'itemId': 23,
+        'itemTs': '1970-01-01T00:00:00Z',
+        'itemText': 'chat banner',
+        'itemStatus': {'type': 'sndNew'},
+      },
+      'content': {'type': 'chatBanner'},
+      'reactions': [],
+    };
+    final timeline = buildTimeline([
+      banner,
+      textItem(text: 'hello', time: now),
+    ], now: now);
+
+    expect(timeline.where((m) => m.isSystem), isEmpty);
+    expect(timeline.where((m) => m.isDateSeparator), hasLength(1));
+    expect(timeline.map((m) => m.text), contains('hello'));
+  });
+
+  test('quotes are attributed from chatDir, never a placeholder label', () {
+    final toPeer = textItem(
+      text: 'answer',
+      time: now,
+      fromMe: true,
+      status: 'sndSent',
+      quoteText: 'original',
+    );
+    final toSelf = textItem(
+      text: 'follow-up',
+      time: now.add(const Duration(minutes: 1)),
+      fromMe: true,
+      status: 'sndSent',
+      quoteText: 'mine',
+      quoteDir: 'directSnd',
+    );
+    final group = _groupItem(
+      text: 'group answer',
+      time: now.add(const Duration(minutes: 2)),
+      sender: 'Maria',
+    );
+    group['quotedItem'] = {
+      'chatDir': {
+        'type': 'groupRcv',
+        'groupMember': {
+          'localAlias': '',
+          'memberProfile': {'displayName': 'Nikita'},
+        },
+      },
+      'content': {'text': 'group original'},
+      'itemId': 7,
+    };
+
+    final timeline = buildTimeline(
+      [toPeer, toSelf, group],
+      now: now,
+      chatName: 'Alice',
+    );
+    final replies = timeline
+        .where((m) => !m.isDateSeparator && m.reply != null)
+        .toList();
+
+    expect(replies[0].reply!.author, 'Alice');
+    expect(replies[1].reply!.author, 'You');
+    expect(replies[2].reply!.author, 'Nikita');
+    for (final message in replies) {
+      expect(message.reply!.author, isNot('Reply'));
+    }
+  });
+
+  test('items sharing a timestamp keep the core order', () {
+    // More than 32 entries so Dart takes the unstable quicksort path; bursts
+    // of same-second items must not shuffle the history.
+    final items = [
+      for (var i = 0; i < 40; i++) textItem(text: 'burst $i', time: now),
+    ];
+    final timeline = buildTimeline(items, now: now);
+    final texts = timeline
+        .where((m) => !m.isDateSeparator)
+        .map((m) => m.text)
+        .toList();
+
+    expect(texts, [for (var i = 0; i < 40; i++) 'burst $i']);
+  });
+
   test('epochs from the chat list survive the micro/milli/second split', () {
     expect(epochToDateTime(0), isNull);
     expect(
