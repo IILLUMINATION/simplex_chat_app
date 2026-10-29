@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/account_models.dart';
+import '../data/profile_image.dart';
 import '../data/account_providers.dart';
 import '../design/app_theme.dart';
 import '../design/app_theme_controller.dart';
@@ -325,6 +326,7 @@ class _ProfileHeader extends StatelessWidget {
               seed: account == null ? 'anonymous' : 'user-${account!.userId}',
               title: name,
               size: 54,
+              imageBytes: profileImageBytes(account?.image),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -380,6 +382,7 @@ class _AccountRow extends StatelessWidget {
                 seed: 'user-${account.userId}',
                 title: account.displayName,
                 size: 26,
+                imageBytes: profileImageBytes(account.image),
               ),
               const SizedBox(width: 10),
               Expanded(

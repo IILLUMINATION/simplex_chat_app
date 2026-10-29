@@ -90,6 +90,11 @@ class ChatPreview {
     this.embeddedContactRequestId,
     this.muted = false,
     this.pinned = false,
+    this.fullName = '',
+    this.shortDescr = '',
+    this.description = '',
+    this.memberCount,
+    this.quantumResistant,
   });
 
   final String chatRef; // e.g. "@1" or "#1"
@@ -114,13 +119,30 @@ class ChatPreview {
   /// Chat is marked as favorite (rendered as pinned).
   final bool pinned;
 
+  /// Contact/group `profile.fullName` — the second name line in SimpleX.
+  final String fullName;
+
+  /// `profile.shortDescr` — the bio shown on the profile card.
+  final String shortDescr;
+
+  /// `groupProfile.description` — the welcome message of a group.
+  final String description;
+
+  /// `groupSummary.currentMembers` for groups.
+  final int? memberCount;
+
+  /// `activeConn.connPQEnabled` — post-quantum ratchet in use.
+  final bool? quantumResistant;
+
   /// Whether the user can send messages in this direct chat (groups always true).
   bool get isMessagingReady {
     if (chatType == 'group') return true;
     if (chatType != 'contact') return false;
     if (contactStatus != null && contactStatus != 'active') return false;
+    // A direct chat with no active connection is a pending contact request:
+    // the core creates the contact row, but messages cannot be delivered yet.
     final t = connStatusType;
-    if (t == null) return true;
+    if (t == null) return false;
     return t == 'ready' || t == 'sndReady';
   }
 
@@ -175,6 +197,11 @@ class ChatPreview {
     int? embeddedContactRequestId;
     bool muted = false;
     bool pinned = false;
+    String fullName = '';
+    String shortDescr = '';
+    String description = '';
+    int? memberCount;
+    bool? quantumResistant;
 
     if (chatType == 'contactRequest' && contactRequest != null) {
       type = 'contactRequest';
@@ -184,6 +211,8 @@ class ChatPreview {
           contactRequest['localDisplayName'] as String? ??
           '';
       id = contactRequest['contactRequestId'] as int?;
+      fullName = profile?['fullName'] as String? ?? '';
+      shortDescr = profile?['shortDescr'] as String? ?? '';
       final img = profile?['image'] as String?;
       avatar = _decodeImage(img);
     } else if (contact != null) {
@@ -196,20 +225,33 @@ class ChatPreview {
       contactStatus = contact['contactStatus'] as String?;
       contactUsed = contact['contactUsed'] as bool?;
       final profile = contact['profile'] as Map<String, dynamic>?;
+      fullName = profile?['fullName'] as String? ?? '';
+      shortDescr = profile?['shortDescr'] as String? ?? '';
+      description = profile?['description'] as String? ?? '';
       final img = profile?['image'] as String?;
       avatar = _decodeImage(img);
       final activeConn = contact['activeConn'] as Map<String, dynamic>?;
       connStatusType = _connStatusTypeFromActiveConn(activeConn);
+      quantumResistant = activeConn?['connPQEnabled'] as bool?;
       embeddedContactRequestId = contact['contactRequestId'] as int?;
       final settings = contact['chatSettings'] as Map<String, dynamic>?;
       (muted, pinned) = _chatSettingsFlags(settings);
     } else if (group != null) {
       type = 'group';
+      final profile = group['groupProfile'] as Map<String, dynamic>?;
       name =
+          profile?['displayName'] as String? ??
           group['groupName'] as String? ??
           group['localDisplayName'] as String? ??
           '';
       id = group['groupId'] as int?;
+      fullName = profile?['fullName'] as String? ?? '';
+      shortDescr = profile?['shortDescr'] as String? ?? '';
+      description = profile?['description'] as String? ?? '';
+      final img = profile?['image'] as String?;
+      avatar ??= _decodeImage(img);
+      final summary = group['groupSummary'] as Map<String, dynamic>?;
+      memberCount = summary?['currentMembers'] as int?;
       final settings = group['chatSettings'] as Map<String, dynamic>?;
       (muted, pinned) = _chatSettingsFlags(settings);
     } else if (chatType == 'contactConnection') {
@@ -241,6 +283,11 @@ class ChatPreview {
       embeddedContactRequestId: embeddedContactRequestId,
       muted: muted,
       pinned: pinned,
+      fullName: fullName,
+      shortDescr: shortDescr,
+      description: description,
+      memberCount: memberCount,
+      quantumResistant: quantumResistant,
     );
   }
 }
@@ -249,7 +296,9 @@ class ChatPreview {
 (bool muted, bool pinned) _chatSettingsFlags(Map<String, dynamic>? settings) {
   if (settings == null) return (false, false);
   final ntfs = settings['enableNtfs'];
-  final ntfsType = ntfs is Map ? ntfs['type'] as String? : null;
+  // The core serialises MsgFilter as a bare string ("all" / "none" /
+  // "mentions"); older builds wrapped it as {"type": ...}.
+  final ntfsType = ntfs is Map ? ntfs['type'] as String? : ntfs as String?;
   final favorite = settings['favorite'] == true;
   return (ntfsType != null && ntfsType != 'all', favorite);
 }

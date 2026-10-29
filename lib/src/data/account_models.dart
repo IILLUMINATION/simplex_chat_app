@@ -5,6 +5,7 @@ class AccountProfile {
     required this.displayName,
     this.fullName = '',
     this.shortDescr = '',
+    this.image,
     this.localDisplayName = '',
     this.active = false,
   });
@@ -13,6 +14,9 @@ class AccountProfile {
   final String displayName;
   final String fullName;
   final String shortDescr;
+
+  /// Data URL of the profile photo, exactly as the core stores it.
+  final String? image;
 
   /// Internal name shown as the SimpleX address handle.
   final String localDisplayName;
@@ -41,6 +45,7 @@ class AccountProfile {
           : displayName,
       fullName: profile?['fullName'] as String? ?? '',
       shortDescr: profile?['shortDescr'] as String? ?? '',
+      image: profile?['image'] as String?,
       localDisplayName: user['localDisplayName'] as String? ?? '',
       active: activeUserId != null
           ? activeUserId == userId

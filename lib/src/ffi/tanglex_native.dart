@@ -39,6 +39,12 @@ class TanglexNative {
   late final TanglexBindings _bindings = TanglexBindings(_library);
 
   static bool _hsInitialized = false;
+  // ignore: unused_field — keeps the RTS argv buffers alive for the process.
+  static ffi.Pointer<ffi.Pointer<Utf8>>? _rtsArgv;
+  // ignore: unused_field
+  static ffi.Pointer<ffi.Pointer<ffi.Pointer<Utf8>>>? _rtsArgvHolder;
+  // ignore: unused_field
+  static ffi.Pointer<ffi.Int32>? _rtsArgc;
 
   ffi.Pointer<ffi.Void>? _chatController;
   Isolate? _eventLoopIsolate;
@@ -51,7 +57,25 @@ class TanglexNative {
       return;
     }
 
-    _bindings.hs_init(0, ffi.nullptr);
+    // Mirrors the official clients' RTS flags: GHC 9.6.3's moving GC breaks
+    // long-running cores, and the 64m nursery keeps the event loop responsive.
+    const rtsArgs = ['tangleX', '+RTS', '-A64m', '-H64m', '-xn'];
+    final argv = calloc<ffi.Pointer<Utf8>>(rtsArgs.length + 1);
+    for (var i = 0; i < rtsArgs.length; i++) {
+      argv[i] = rtsArgs[i].toNativeUtf8();
+    }
+    argv[rtsArgs.length] = ffi.nullptr;
+    // GHC's `hs_init_with_rtsopts(int *argc, char **argv[])` takes a pointer
+    // to the argv variable (char ***), exactly like the official clients'
+    // `char **pargv = argv; hs_init_with_rtsopts(&argc, &pargv)`.
+    final argvHolder = calloc<ffi.Pointer<ffi.Pointer<Utf8>>>()
+      ..value = argv;
+    final argc = calloc<ffi.Int32>()..value = rtsArgs.length;
+    // The RTS keeps referencing these buffers for the process lifetime.
+    _rtsArgv = argv;
+    _rtsArgvHolder = argvHolder;
+    _rtsArgc = argc;
+    _bindings.hs_init_with_rtsopts(argc, argvHolder.cast());
     _hsInitialized = true;
   }
 
@@ -162,6 +186,25 @@ class TanglexNative {
           return _takeCStringAndFreeStatic(resultPtr);
         } finally {
           malloc.free(cmdPtr);
+        }
+      }),
+    );
+  }
+
+  /// Runs the core's markdown parser (`chat_parse_markdown`) and returns the
+  /// `ParsedMarkdown` JSON. Needs no chat controller, only the RTS.
+  Future<String?> parseMarkdown(String text) {
+    return init().then(
+      (_) => Future<String?>.microtask(() {
+        final textPtr = text.toNativeUtf8();
+        try {
+          final resultPtr = _bindings.chat_parse_markdown(
+            textPtr.cast<ffi.Char>(),
+          );
+          if (resultPtr == ffi.nullptr) return null;
+          return _takeCStringAndFreeStatic(resultPtr);
+        } finally {
+          malloc.free(textPtr);
         }
       }),
     );

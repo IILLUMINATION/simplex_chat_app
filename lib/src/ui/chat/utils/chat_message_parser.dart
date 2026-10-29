@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:intl/intl.dart';
 import 'package:image/image.dart' as img;
 
+import '../../../data/formatted_text.dart';
 import '../models/chat_message_models.dart';
 
 UiMessage? parseChatItem(Map<String, dynamic> msg, {String? filesBaseDir}) {
@@ -17,15 +18,58 @@ UiMessage? parseChatItem(Map<String, dynamic> msg, {String? filesBaseDir}) {
   final status = statusObj is Map ? (statusObj['type'] as String? ?? '') : '';
   final itemText = meta?['itemText'] as String?;
   final itemId = meta?['itemId'] as int?;
+  final edited = meta?['itemEdited'] == true;
+  final editable = meta?['editable'] == true;
+  final deletable = meta?['deletable'] == true;
+  final forwardedFrom = meta?['itemForwarded'];
+  Map<String, dynamic>? forwardedMap;
+  if (forwardedFrom is Map) {
+    forwardedMap = Map<String, dynamic>.from(forwardedFrom);
+  }
+  final forwarded = forwardedMap != null;
+  final forwardName = forwardedMap?['chatName'];
   final tsStr = meta?['itemTs'] as String?;
   final quotedItem = msg['quotedItem'] as Map<String, dynamic>?;
   final quotedContent = quotedItem?['content'] as Map<String, dynamic>?;
   final quotedText = quotedContent?['text'] as String?;
-  final quotedSender = quotedItem?['senderName'] as String?;
+  final quotedDir = quotedItem?['chatDir'] as Map<String, dynamic>?;
+  final quotedDirType = quotedDir?['type'] as String? ?? '';
+  final quotedMember = quotedDir?['groupMember'] as Map<String, dynamic>?;
+  final quotedMemberProfile =
+      quotedMember?['memberProfile'] as Map<String, dynamic>?;
+  final quotedAlias = (quotedMember?['localAlias'] as String? ?? '').trim();
+  final quotedMemberName = quotedAlias.isNotEmpty
+      ? quotedAlias
+      : (quotedMemberProfile?['displayName'] as String? ?? '').trim();
   final quotedItemId = quotedItem?['itemId'] as int?;
   final quoted = (quotedText?.isNotEmpty == true)
-      ? QuotedMessage(text: quotedText!, senderName: quotedSender ?? '', itemId: quotedItemId)
+      ? QuotedMessage(
+          text: quotedText!,
+          senderName: quotedMemberName,
+          chatDir: quotedDirType,
+          itemId: quotedItemId,
+          formattedText: parseFormattedText(quotedItem?['formattedText']),
+        )
       : null;
+  final reactions = <UiReaction>[];
+  for (final entry in msg['reactions'] as List? ?? const []) {
+    if (entry is! Map) continue;
+    final reaction = entry['reaction'];
+    if (reaction is! Map) continue;
+    final rawEmoji = (reaction['emoji'] as String?)?.trim();
+    // Official clients show "?" for reaction types this build does not know,
+    // and the core stores the heart as a bare U+2764 char.
+    final emoji = rawEmoji == null || rawEmoji.isEmpty
+        ? '?'
+        : (rawEmoji == '❤️' ? '❤' : rawEmoji);
+    reactions.add(
+      UiReaction(
+        emoji: emoji,
+        count: entry['totalReacted'] as int? ?? 1,
+        mine: entry['userReacted'] == true,
+      ),
+    );
+  }
   final msgKey = '${dirType}_${tsStr ?? ''}_${itemText ?? ''}';
   String timeStr = '';
   DateTime? time;
@@ -38,18 +82,10 @@ UiMessage? parseChatItem(Map<String, dynamic> msg, {String? filesBaseDir}) {
 
   final content = msg['content'] as Map<String, dynamic>?;
   final contentType = content?['type'] as String?;
-  if (contentType == 'chatBanner') {
-    return UiMessage(
-      key: 'banner_$tsStr',
-      text: itemText ?? 'Chat started',
-      fromMe: false,
-      timeStr: '',
-      status: '',
-      isSystem: true,
-      images: const [],
-      time: time,
-    );
-  }
+  // v7 stores a per-chat "chatBanner" item with a placeholder itemText and a
+  // zero itemTs; the official client renders it as a contextual top card.
+  // Until that card exists, dropping it beats showing "chat banner" in 1970.
+  if (contentType == 'chatBanner') return null;
 
   if (contentType == 'sndMsgContent' || contentType == 'rcvMsgContent') {
     final msgContent = content?['msgContent'] as Map<String, dynamic>?;
@@ -174,6 +210,7 @@ UiMessage? parseChatItem(Map<String, dynamic> msg, {String? filesBaseDir}) {
         time: time,
         itemId: itemId,
         quoted: quoted,
+        reactions: reactions,
         audio: audioItem,
         fileName: fileName,
         fileSize: fileSize,
@@ -182,6 +219,13 @@ UiMessage? parseChatItem(Map<String, dynamic> msg, {String? filesBaseDir}) {
         fileStatusType: fileStatusType,
         transferProgress: transferProgress,
         transferTotal: transferTotal,
+        edited: edited,
+        editable: editable,
+        deletable: deletable,
+        forwarded: forwarded,
+        forwardedFrom: forwardName is String && forwardName.isNotEmpty
+            ? forwardName
+            : null,
       );
     }
 
@@ -209,6 +253,7 @@ UiMessage? parseChatItem(Map<String, dynamic> msg, {String? filesBaseDir}) {
         time: time,
         itemId: itemId,
         quoted: quoted,
+        reactions: reactions,
       );
     }
     String display = text;
@@ -239,6 +284,11 @@ UiMessage? parseChatItem(Map<String, dynamic> msg, {String? filesBaseDir}) {
     if (isSticker) {
       display = '';
     }
+    // Only hand the spans over when the bubble shows the core text verbatim;
+    // voice/report prefixes and the sticker sentinel rewrite it.
+    final formatted = display == text && !isSticker
+        ? parseFormattedText(msg['formattedText'])
+        : null;
     return UiMessage(
       key: msgKey,
       text: display.isNotEmpty ? display : fallbackItemText,
@@ -250,6 +300,15 @@ UiMessage? parseChatItem(Map<String, dynamic> msg, {String? filesBaseDir}) {
       time: time,
       itemId: itemId,
       quoted: quoted,
+      reactions: reactions,
+      formattedText: formatted,
+      edited: edited,
+      editable: editable,
+      deletable: deletable,
+      forwarded: forwarded,
+      forwardedFrom: forwardName is String && forwardName.isNotEmpty
+          ? forwardName
+          : null,
       fileName: msgType == 'file' ? fileName : null,
       fileSize: msgType == 'file' ? fileSize : null,
       filePath: msgType == 'file' ? filePath : null,

@@ -1,9 +1,15 @@
+import 'dart:io';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../data/account_providers.dart';
+import '../data/chat_core.dart';
 import '../data/chat_providers.dart';
 import '../design/app_theme.dart';
+import '../ui/chat/utils/chat_message_parser.dart';
 import 'adaptive_shell.dart';
 import 'appearance_settings.dart';
 import 'chat_list_panel.dart';
@@ -49,6 +55,7 @@ class _MessengerShellState extends ConsumerState<MessengerShell> {
           _selectedId = null;
           _detailsOpen = false;
         });
+        ref.read(activeChatRefProvider.notifier).state = null;
       });
       return;
     }
@@ -62,6 +69,7 @@ class _MessengerShellState extends ConsumerState<MessengerShell> {
         _detailsOpen = false;
       });
     }
+    ref.read(activeChatRefProvider.notifier).state = id;
     final chats = ref.read(chatsProvider).valueOrNull ?? const <ChatSummary>[];
     ChatSummary? chat;
     for (final candidate in chats) {
@@ -124,6 +132,199 @@ class _MessengerShellState extends ConsumerState<MessengerShell> {
         ),
       );
     }
+  }
+
+  Future<void> _attachPhoto(String chatRef) async {
+    final files = await ImagePicker().pickMultiImage(imageQuality: 90);
+    if (files.isEmpty || !mounted) return;
+    final images = <OutgoingImage>[];
+    for (final file in files) {
+      final bytes = await file.readAsBytes();
+      final preview = makePreview(bytes);
+      images.add(
+        OutgoingImage(
+          filePath: file.path,
+          previewBytes: preview.bytes,
+          previewMime: preview.mime,
+        ),
+      );
+    }
+    final ok = await ref
+        .read(chatCoreProvider)
+        .sendImages(chatRef, images);
+    if (!ok) _toast('Could not send the photo');
+  }
+
+  Future<void> _attachFile(String chatRef) async {
+    final result = await FilePicker.platform.pickFiles(
+      withData: false,
+      allowMultiple: true,
+    );
+    if (result == null || result.files.isEmpty || !mounted) return;
+    var failed = false;
+    for (final file in result.files) {
+      final path = file.path;
+      if (path == null) continue;
+      final ok = await ref.read(chatCoreProvider).sendFile(chatRef, path);
+      failed = failed || !ok;
+    }
+    if (failed) _toast('Could not send the file');
+  }
+
+  /// Sends the composer's pasted attachments. Photos leave as one album with
+  /// the caption on its first photo, documents follow as file messages, so
+  /// the caption lands on exactly the first item like Telegram's send preview.
+  Future<void> _sendAttachments(
+    String chatRef,
+    List<ComposerAttachment> attachments,
+    String caption, {
+    int? quotedItemId,
+  }) async {
+    if (attachments.isEmpty) return;
+    final images = <OutgoingImage>[];
+    final files = <ComposerAttachment>[];
+    for (final attachment in attachments) {
+      final preview = attachment.previewBytes;
+      if (attachment.isImage && preview != null) {
+        images.add(
+          OutgoingImage(
+            filePath: attachment.path,
+            previewBytes: preview,
+            previewMime: attachment.previewMime ?? 'image/jpeg',
+          ),
+        );
+      } else {
+        files.add(attachment);
+      }
+    }
+    var failed = false;
+    var captionPending = caption.isNotEmpty;
+    var quotePending = quotedItemId != null;
+    if (images.isNotEmpty) {
+      final ok = await ref
+          .read(chatCoreProvider)
+          .sendImages(
+            chatRef,
+            images,
+            text: captionPending ? caption : '',
+            quotedItemId: quotePending ? quotedItemId : null,
+          );
+      failed = !ok;
+      captionPending = false;
+      quotePending = false;
+    }
+    for (final file in files) {
+      final ok = await ref
+          .read(chatCoreProvider)
+          .sendFile(
+            chatRef,
+            file.path,
+            text: captionPending ? caption : '',
+            quotedItemId: quotePending ? quotedItemId : null,
+          );
+      failed = failed || !ok;
+      captionPending = false;
+      quotePending = false;
+    }
+    if (failed && mounted) _toast('Could not send the attachment');
+  }
+
+  Future<void> _downloadFile(MessageItem message) async {
+    final fileId = message.fileId;
+    if (fileId == null) return;
+    final ok = await ref.read(chatCoreProvider).receiveFile(fileId);
+    if (!ok) _toast('Could not download the file');
+  }
+
+  Future<void> _openFile(MessageItem message) async {
+    final path = message.filePath;
+    if (path == null || path.isEmpty) return;
+    try {
+      if (Platform.isLinux) {
+        await Process.start(
+          'xdg-open',
+          [path],
+          mode: ProcessStartMode.detached,
+        );
+      } else if (Platform.isMacOS) {
+        await Process.start('open', [path], mode: ProcessStartMode.detached);
+      } else if (Platform.isWindows) {
+        await Process.start('cmd', ['/c', 'start', '', path]);
+      }
+    } catch (_) {
+      _toast('Could not open the file');
+    }
+  }
+
+  void _toggleReaction(MessageItem message, String emoji) {
+    final itemId = message.itemId;
+    if (itemId == null || _selectedId == null) return;
+    ref
+        .read(messagesProvider(_selectedId!).notifier)
+        .toggleReaction(itemId, emoji);
+  }
+
+  /// The core copies the item into the target chat; both chat lists pick the
+  /// change up from `newChatItems`, so only the toast is ours.
+  Future<void> _forwardMessage(
+    String fromChatRef,
+    int itemId,
+    ChatSummary target,
+  ) async {
+    final ok = await ref
+        .read(chatCoreProvider)
+        .forwardMessages(target.id, fromChatRef, [itemId]);
+    if (!mounted) return;
+    _toast(ok ? 'Forwarded to ${target.name}' : 'Could not forward the message');
+  }
+
+  Future<void> _acceptRequest(int requestId, {bool incognito = false}) async {
+    final ok = await ref
+        .read(chatCoreProvider)
+        .acceptContactRequest(requestId, incognito: incognito);
+    if (!ok) {
+      _toast('Could not accept the contact request');
+      return;
+    }
+    await ref.read(chatsProvider.notifier).refresh();
+  }
+
+  Future<void> _declineRequest(ChatSummary chat) async {
+    final requestId = chat.requestId;
+    if (requestId == null) return;
+    final ok = await ref
+        .read(chatCoreProvider)
+        .rejectContactRequest(requestId);
+    if (!ok) {
+      _toast('Could not decline the contact request');
+      return;
+    }
+    await ref.read(chatsProvider.notifier).refresh();
+  }
+
+  /// Telegram opens the profile from the conversation header: third column on
+  /// desktop, a pushed screen on tablet/phone.
+  void _openInfo(ChatSummary chat) {
+    if (MediaQuery.sizeOf(context).width >= 900) {
+      setState(() => _detailsOpen = true);
+      return;
+    }
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (routeContext) => Scaffold(
+          backgroundColor: context.appTheme.palette.windowBg,
+          body: DetailsPanel(
+            chat: chat,
+            onClose: () => Navigator.of(routeContext).pop(),
+            onToggleMute: () => _toggleMute(chat),
+            onSearch: () {
+              Navigator.of(routeContext).pop();
+              ref.read(chatSearchRequestProvider(chat.id).notifier).state++;
+            },
+          ),
+        ),
+      ),
+    );
   }
 
   void _toast(String message) {
@@ -213,12 +414,51 @@ class _MessengerShellState extends ConsumerState<MessengerShell> {
         canSend: selectedChat.canSend,
         sending: sending,
         searchRequest: ref.watch(chatSearchRequestProvider(selectedChat.id)),
-        onSend: (text) =>
-            ref.read(messagesProvider(selectedChat.id).notifier).send(text),
+        onSend: (text, {int? quotedItemId, MessageReply? reply}) => ref
+            .read(messagesProvider(selectedChat.id).notifier)
+            .send(
+              text,
+              quotedItemId: quotedItemId,
+              reply: reply,
+            ),
+        onReact: _toggleReaction,
+        onEdit: (message, text) {
+          final itemId = message.itemId;
+          if (itemId == null) return;
+          ref
+              .read(messagesProvider(selectedChat.id).notifier)
+              .editMessage(itemId, text);
+        },
+        onDelete: (message, {required bool forEveryone}) {
+          final itemId = message.itemId;
+          if (itemId == null) return;
+          ref
+              .read(messagesProvider(selectedChat.id).notifier)
+              .deleteMessage(itemId, forEveryone: forEveryone);
+        },
+        forwardTargets: chats,
+        onForward: (message, target) {
+          final itemId = message.itemId;
+          if (itemId == null) return;
+          _forwardMessage(selectedChat.id, itemId, target);
+        },
+        onAttachPhoto: () => _attachPhoto(selectedChat.id),
+        onAttachFile: () => _attachFile(selectedChat.id),
+        onSendAttachments: (attachments, caption, {int? quotedItemId}) =>
+            _sendAttachments(
+              selectedChat.id,
+              attachments,
+              caption,
+              quotedItemId: quotedItemId,
+            ),
+        onDownloadFile: _downloadFile,
+        onOpenFile: _openFile,
+        onAcceptRequest: _acceptRequest,
+        onDeclineRequest: () => _declineRequest(selectedChat),
         onBack: MediaQuery.sizeOf(context).width < 640
             ? () => setState(() => _selectedId = null)
             : null,
-        onToggleDetails: () => setState(() => _detailsOpen = !_detailsOpen),
+        onOpenInfo: () => _openInfo(selectedChat),
       );
     }
 

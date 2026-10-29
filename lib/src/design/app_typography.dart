@@ -1,6 +1,31 @@
 import 'package:flutter/foundation.dart' show immutable;
 import 'package:flutter/painting.dart';
 
+/// Bundled in `pubspec.yaml`; Roboto/Inter have no emoji glyphs and Linux
+/// fontconfig can pick a monochrome face before the colour one. The family is
+/// app-specific on purpose: the bundled pack is the sbix build of Noto Color
+/// Emoji and has no regional indicators, so missing glyphs must reach the
+/// platform emoji font instead of resolving back to this face.
+const String emojiFontFamily = 'TangleX Emoji';
+
+/// Fallback chain for text: the bundled pack first, then the platform emoji
+/// faces that cover what the pack lacks (flags above all), then the system
+/// sans for non-emoji glyphs absent from Roboto (CJK and friends).
+const List<String> emojiFontFallback = [
+  emojiFontFamily,
+  'Apple Color Emoji',
+  'Segoe UI Emoji',
+  'Noto Color Emoji',
+  'sans-serif',
+];
+
+/// The primary family must be a face without emoji coverage. On Linux a null
+/// or `sans-serif` primary resolves to DejaVu Sans, which carries monochrome
+/// glyphs for part of the emoji block — they win over the fallback chain and
+/// the reaction picker painted 😀😂😢❤ as white outlines. Bundled Roboto has
+/// no emoji and also keeps ASCII digits away from Noto's keycap glyphs.
+const String defaultTextFontFamily = 'Roboto';
+
 /// Text styles follow Telegram's scale: 13 px on desktop, 16 dp on phone,
 /// with metadata one step smaller.
 @immutable
@@ -48,7 +73,8 @@ class AppTypography {
     double? spacing,
   }) =>
       TextStyle(
-        fontFamily: family,
+        fontFamily: family ?? defaultTextFontFamily,
+        fontFamilyFallback: emojiFontFallback,
         fontSize: size,
         fontWeight: weight,
         height: height,

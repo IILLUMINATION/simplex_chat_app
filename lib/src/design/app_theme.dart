@@ -80,6 +80,7 @@ class AppTheme {
       highlightColor: Colors.transparent,
       hoverColor: p.windowBgOver,
       fontFamily: t.message.fontFamily,
+      fontFamilyFallback: emojiFontFallback,
       textTheme: TextTheme(
         titleLarge: t.chatTitle.copyWith(color: p.text),
         titleMedium: t.listName.copyWith(color: p.text),

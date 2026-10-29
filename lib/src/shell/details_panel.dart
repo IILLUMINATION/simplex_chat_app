@@ -4,7 +4,11 @@ import '../design/app_theme.dart';
 import 'models.dart';
 import 'widgets/peer_avatar.dart';
 
-/// Third column: chat profile, mirroring Telegram's right sidebar.
+/// Third column: chat profile, mirroring Telegram's info sidebar.
+///
+/// Cover metrics come from Telegram Desktop (`info.style`: 108 px cover,
+/// 72 px userpic at 19/18, name at 109/32, status at 109/58); the narrow
+/// layout centres the userpic the way Telegram Android's profile does.
 class DetailsPanel extends StatelessWidget {
   const DetailsPanel({
     super.key,
@@ -25,6 +29,10 @@ class DetailsPanel extends StatelessWidget {
     final p = theme.palette;
     final t = theme.typography;
 
+    // The panel is a third column on wide screens only; below the shell's
+    // 900 px info breakpoint it is pushed as a full screen, which uses the
+    // Telegram Android layout (centred userpic, back arrow).
+    final compact = MediaQuery.sizeOf(context).width < 900;
     return ColoredBox(
       color: p.windowBg,
       child: Column(
@@ -33,110 +41,73 @@ class DetailsPanel extends StatelessWidget {
             height: theme.metrics.topBarHeight,
             child: Row(
               children: [
-                if (onClose != null)
-                  IconButton(
-                    onPressed: onClose,
-                    icon: Icon(Icons.close, size: theme.metrics.iconSize),
-                    color: p.icon,
+                if (compact && onClose != null)
+                  _TopBarButton(
+                    icon: Icons.arrow_back,
+                    tooltip: 'Back',
+                    onTap: onClose!,
+                  )
+                else
+                  const SizedBox(width: 12),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Text(
+                    chat.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: t.listName.copyWith(
+                      color: p.text,
+                      fontSize: compact ? 18 : 15,
+                    ),
                   ),
-                const SizedBox(width: 8),
-                Text('Profile', style: t.chatTitle.copyWith(color: p.text)),
+                ),
+                if (onSearch != null)
+                  _TopBarButton(
+                    icon: Icons.search,
+                    tooltip: 'Search messages',
+                    onTap: onSearch!,
+                  ),
+                if (!compact && onClose != null)
+                  _TopBarButton(
+                    icon: Icons.close,
+                    tooltip: 'Close',
+                    onTap: onClose!,
+                  ),
+                const SizedBox(width: 4),
               ],
             ),
           ),
           Container(height: 1, color: p.divider),
           Expanded(
             child: ListView(
-              padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 8),
+              padding: EdgeInsets.zero,
               children: [
-                const SizedBox(height: 12),
-                Center(
-                  child: PeerAvatar(
-                    seed: chat.id,
-                    title: chat.name,
-                    size: 100,
-                    fontSize: 36,
-                    imageBytes: chat.avatarBytes,
+                compact ? _CompactCover(chat: chat) : _Cover(chat: chat),
+                if (chat.bio.isNotEmpty)
+                  _InfoLine(
+                    label: chat.isGroup ? 'Description' : 'Bio',
+                    value: chat.bio,
                   ),
-                ),
-                const SizedBox(height: 12),
-                Center(
-                  child: Text(
-                    chat.name,
-                    textAlign: TextAlign.center,
-                    style: t.chatTitle.copyWith(color: p.text, fontSize: 17),
+                if (chat.fullName.isNotEmpty && chat.fullName != chat.name)
+                  _InfoLine(label: 'Full name', value: chat.fullName),
+                if (chat.isGroup && chat.memberCount != null)
+                  _InfoLine(
+                    label: 'Members',
+                    value: '${chat.memberCount}',
                   ),
-                ),
-                const SizedBox(height: 4),
-                Center(
-                  child: Text(
-                    chat.subtitle ??
-                        (chat.online ? 'online' : 'last seen recently'),
-                    style: t.listTime.copyWith(
-                      color: chat.online ? p.link : p.textSecondary,
-                    ),
+                if (chat.quantumResistant != null)
+                  _InfoLine(
+                    label: 'E2E encryption',
+                    value: chat.quantumResistant!
+                        ? 'Quantum resistant'
+                        : 'Standard',
                   ),
-                ),
-                const SizedBox(height: 16),
-                if (onToggleMute != null || onSearch != null)
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                    children: [
-                      if (onToggleMute != null)
-                        _Action(
-                          icon: chat.muted
-                              ? Icons.volume_off
-                              : Icons.volume_up,
-                          label: chat.muted ? 'Unmute' : 'Mute',
-                          onTap: onToggleMute!,
-                        ),
-                      if (onSearch != null)
-                        _Action(
-                          icon: Icons.search,
-                          label: 'Search',
-                          onTap: onSearch!,
-                        ),
-                    ],
-                  ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 8),
                 Container(height: 1, color: p.divider),
-                _InfoTile(
-                  icon: chat.isGroup
-                      ? Icons.groups_outlined
-                      : Icons.person_outline,
-                  title: chat.isGroup ? 'Group chat' : 'Direct chat',
-                  subtitle: 'Chat type',
+                _NotificationsRow(
+                  muted: chat.muted,
+                  onToggle: onToggleMute,
                 ),
-                _InfoTile(
-                  icon: chat.canSend
-                      ? Icons.check_circle_outline
-                      : Icons.schedule,
-                  title: chat.canSend ? 'Ready to send' : 'Connecting…',
-                  subtitle: 'Connection',
-                ),
-                _InfoTile(
-                  icon: Icons.tag,
-                  title: chat.id,
-                  subtitle: 'SimpleX chat reference',
-                ),
-                if (chat.unread > 0)
-                  _InfoTile(
-                    icon: Icons.mark_chat_unread_outlined,
-                    title: '${chat.unread} unread',
-                    subtitle: 'Unread messages',
-                  ),
-                if (chat.muted)
-                  const _InfoTile(
-                    icon: Icons.notifications_off_outlined,
-                    title: 'Notifications off',
-                    subtitle: 'Muted',
-                  ),
-                if (chat.pinned)
-                  const _InfoTile(
-                    icon: Icons.push_pin_outlined,
-                    title: 'Pinned',
-                    subtitle: 'Shown at the top of the list',
-                  ),
               ],
             ),
           ),
@@ -146,85 +117,234 @@ class DetailsPanel extends StatelessWidget {
   }
 }
 
-class _Action extends StatelessWidget {
-  const _Action({
-    required this.icon,
-    required this.label,
-    required this.onTap,
-  });
+/// Telegram Desktop cover: userpic on the left, name and status to its right.
+class _Cover extends StatelessWidget {
+  const _Cover({required this.chat});
 
-  final IconData icon;
+  final ChatSummary chat;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.appTheme.typography;
+    final p = context.appTheme.palette;
+    return SizedBox(
+      height: 108,
+      child: Stack(
+        children: [
+          Positioned(
+            left: 19,
+            top: 18,
+            child: PeerAvatar(
+              seed: chat.id,
+              title: chat.name,
+              size: 72,
+              fontSize: 26,
+              imageBytes: chat.avatarBytes,
+            ),
+          ),
+          Positioned(
+            left: 109,
+            top: 32,
+            right: 20,
+            child: Text(
+              chat.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: t.listName.copyWith(color: p.text, fontSize: 16),
+            ),
+          ),
+          Positioned(
+            left: 109,
+            top: 58,
+            right: 20,
+            child: Text(
+              _status(chat),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: t.listTime.copyWith(
+                color: p.textSecondary,
+                fontSize: 14,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Telegram Android cover: centred userpic above the name.
+class _CompactCover extends StatelessWidget {
+  const _CompactCover({required this.chat});
+
+  final ChatSummary chat;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.appTheme.typography;
+    final p = context.appTheme.palette;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 24, 24, 12),
+      child: Column(
+        children: [
+          PeerAvatar(
+            seed: chat.id,
+            title: chat.name,
+            size: 112,
+            fontSize: 40,
+            imageBytes: chat.avatarBytes,
+          ),
+          const SizedBox(height: 12),
+          Text(
+            chat.name,
+            textAlign: TextAlign.center,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: t.chatTitle.copyWith(color: p.text, fontSize: 20),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            _status(chat),
+            textAlign: TextAlign.center,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: t.listPreview.copyWith(
+              color: p.textSecondary,
+              fontSize: 14,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+String _status(ChatSummary chat) {
+  if (chat.isGroup) {
+    final members = chat.memberCount;
+    if (members == null) return 'group';
+    return '$members ${members == 1 ? 'member' : 'members'}';
+  }
+  if (chat.needsAccept) return 'contact request';
+  return chat.canSend ? 'connected' : 'connecting…';
+}
+
+/// Telegram's `TextWithLabel` info row (`infoProfileLabeledPadding`).
+class _InfoLine extends StatelessWidget {
+  const _InfoLine({required this.label, required this.value});
+
   final String label;
-  final VoidCallback onTap;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.appTheme.typography;
+    final p = context.appTheme.palette;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(23, 9, 20, 7),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: t.listTime.copyWith(color: p.textSecondary),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            value,
+            style: t.listPreview.copyWith(color: p.text, fontSize: 14),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Telegram settings-style row with a switch (`Switch` in Android's profile).
+class _NotificationsRow extends StatelessWidget {
+  const _NotificationsRow({required this.muted, this.onToggle});
+
+  final bool muted;
+  final VoidCallback? onToggle;
 
   @override
   Widget build(BuildContext context) {
     final theme = context.appTheme;
     final p = theme.palette;
+    final t = theme.typography;
     return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
+      onTap: onToggle,
       hoverColor: p.windowBgOver,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-        child: Column(
-          children: [
-            Icon(icon, size: theme.metrics.iconSize, color: p.iconActive),
-            const SizedBox(height: 4),
-            Text(
-              label,
-              style: theme.typography.listTime.copyWith(color: p.textSecondary),
-            ),
-          ],
+        padding: const EdgeInsets.fromLTRB(16, 0, 12, 0),
+        child: SizedBox(
+          height: 48,
+          child: Row(
+            children: [
+              Icon(
+                muted
+                    ? Icons.notifications_off_outlined
+                    : Icons.notifications_none,
+                size: theme.metrics.iconSize,
+                color: p.icon,
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Text(
+                  'Notifications',
+                  style: t.listPreview.copyWith(color: p.text, fontSize: 14),
+                ),
+              ),
+              Transform.scale(
+                scale: 0.82,
+                child: Switch(
+                  value: !muted,
+                  onChanged: onToggle == null ? null : (_) => onToggle!(),
+                  activeThumbColor: p.onAccent,
+                  activeTrackColor: p.accent,
+                  inactiveThumbColor: p.windowBg,
+                  inactiveTrackColor: p.windowBgOver,
+                  trackOutlineColor: WidgetStatePropertyAll(p.icon),
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 }
 
-class _InfoTile extends StatelessWidget {
-  const _InfoTile({
+class _TopBarButton extends StatelessWidget {
+  const _TopBarButton({
     required this.icon,
-    required this.title,
-    required this.subtitle,
+    required this.tooltip,
+    required this.onTap,
   });
 
   final IconData icon;
-  final String title;
-  final String subtitle;
+  final String tooltip;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final theme = context.appTheme;
-    final p = theme.palette;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
-      child: Row(
-        children: [
-          Icon(icon, size: theme.metrics.iconSize, color: p.icon),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.typography.listPreview.copyWith(
-                    color: p.text,
-                  ),
-                ),
-                Text(
-                  subtitle,
-                  style: theme.typography.listTime.copyWith(
-                    color: p.textSecondary,
-                  ),
-                ),
-              ],
-            ),
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: onTap,
+        customBorder: const CircleBorder(),
+        hoverColor: theme.palette.windowBgOver,
+        child: SizedBox(
+          width: 40,
+          height: 40,
+          child: Icon(
+            icon,
+            size: theme.metrics.iconSize,
+            color: theme.palette.icon,
           ),
-        ],
+        ),
       ),
     );
   }

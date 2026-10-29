@@ -38,6 +38,30 @@ class TanglexBindings {
         void Function(int, ffi.Pointer<ffi.Pointer<ffi.Pointer<ffi.Char>>>)
       >();
 
+  void hs_init_with_rtsopts(
+    ffi.Pointer<ffi.Int32> argc,
+    ffi.Pointer<ffi.Pointer<ffi.Pointer<ffi.Char>>> argv,
+  ) {
+    return _hs_init_with_rtsopts(argc, argv);
+  }
+
+  late final _hs_init_with_rtsoptsPtr =
+      _lookup<
+        ffi.NativeFunction<
+          ffi.Void Function(
+            ffi.Pointer<ffi.Int32>,
+            ffi.Pointer<ffi.Pointer<ffi.Pointer<ffi.Char>>>,
+          )
+        >
+      >('hs_init_with_rtsopts');
+  late final _hs_init_with_rtsopts = _hs_init_with_rtsoptsPtr
+      .asFunction<
+        void Function(
+          ffi.Pointer<ffi.Int32>,
+          ffi.Pointer<ffi.Pointer<ffi.Pointer<ffi.Char>>>,
+        )
+      >();
+
   ffi.Pointer<ffi.Char> chat_migrate_init_key(
     ffi.Pointer<ffi.Char> path,
     ffi.Pointer<ffi.Char> key,

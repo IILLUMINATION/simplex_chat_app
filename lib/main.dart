@@ -1,37 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import 'src/localization/app_localizations.dart';
-import 'src/providers/locale_provider.dart';
-import 'src/providers/theme_provider.dart';
-import 'src/ui/home_screen.dart';
+import 'src/design/app_theme.dart';
+import 'src/design/app_theme_controller.dart';
+import 'src/shell/messenger_shell.dart';
+import 'src/shell/window_chrome.dart';
 
-export 'src/providers/core_provider.dart' show tanglexServiceProvider;
-
-// Global notifier to trigger the FAB action from HomeScreen -> ChatsScreen
-class _FabActionNotifier extends ChangeNotifier {
-  VoidCallback? _handler;
-
-  void setHandler(VoidCallback handler) {
-    _handler = handler;
-  }
-
-  void clearHandler() {
-    _handler = null;
-  }
-
-  void trigger() {
-    _handler?.call();
-  }
-}
-
-final fabActionProvider = ChangeNotifierProvider<_FabActionNotifier>((ref) {
-  final notifier = _FabActionNotifier();
-  ref.onDispose(() => notifier.dispose());
-  return notifier;
-});
-
+/// TangleX entry: the adaptive Telegram-style shell backed by the SimpleX core.
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   runApp(const ProviderScope(child: TangleXApp()));
@@ -42,29 +17,29 @@ class TangleXApp extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final themeConfig = ref.watch(themeNotifierProvider);
-    final localeConfig = ref.watch(localeNotifierProvider);
-    final notifier = ref.watch(themeNotifierProvider.notifier);
-    final locale = AppLocale.fromCode(localeConfig.locale);
+    final settings = ref.watch(appThemeProvider);
+    final light = ref.watch(appThemeLightProvider);
+    final dark = ref.watch(appThemeDarkProvider);
 
     return MaterialApp(
-      title: 'TangleX Chat',
+      title: 'TangleX',
       debugShowCheckedModeBanner: false,
-      themeMode: AppThemeMode.fromName(themeConfig.mode).flutterMode,
-      theme: notifier.lightTheme,
-      darkTheme: notifier.darkTheme,
-      locale: locale.flutterLocale,
-      supportedLocales: const [
-        Locale('en'),
-        Locale('ru'),
-      ],
-      localizationsDelegates: const [
-        AppLocalizationsDelegate(),
-        GlobalMaterialLocalizations.delegate,
-        GlobalWidgetsLocalizations.delegate,
-        GlobalCupertinoLocalizations.delegate,
-      ],
-      home: const HomeScreen(),
+      theme: light.toMaterial(),
+      darkTheme: dark.toMaterial(),
+      themeMode: settings.mode,
+      builder: (context, child) {
+        final platform = MediaQuery.platformBrightnessOf(context);
+        final brightness = switch (settings.mode) {
+          ThemeMode.light => Brightness.light,
+          ThemeMode.dark => Brightness.dark,
+          ThemeMode.system => platform,
+        };
+        return AppThemeScope(
+          theme: brightness == Brightness.dark ? dark : light,
+          child: child ?? const SizedBox.shrink(),
+        );
+      },
+      home: const WindowChrome(child: MessengerShell()),
     );
   }
 }

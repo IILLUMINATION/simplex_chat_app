@@ -10,6 +10,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../data/connect_plan.dart';
+import '../data/formatted_text.dart';
 import '../ffi/tanglex_native.dart';
 import '../providers/persistent_store.dart';
 
@@ -408,6 +409,134 @@ class TanglexService {
     }
   }
 
+  /// Runs the core's markdown parser without a chat controller
+  /// (`chat_parse_markdown`, exported by `Mobile.hs`).
+  Future<List<MessageSpan>?> parseMarkdown(String text) async {
+    try {
+      final raw = await _native.parseMarkdown(text);
+      if (raw == null || raw.isEmpty) return null;
+      final json = Map<String, dynamic>.from(_decodeJson(raw));
+      return parseFormattedText(json['formattedText']);
+    } catch (e) {
+      _appendLog('parseMarkdown error: $e');
+      return null;
+    }
+  }
+
+  /// Replaces a sent message (`/_update item chatRef itemId text <text>`).
+  ///
+  /// The core answers `chatItemUpdated`, or `chatItemNotChanged` when the new
+  /// text equals the stored one (`processChatCommand` in `Commands.hs`).
+  Future<bool> editMessage(String chatRef, int itemId, String text) async {
+    final resp = await sendCommand(
+      '/_update item $chatRef $itemId text ${_escapeText(text)}',
+    );
+    if (resp == null) return false;
+    try {
+      final json = Map<String, dynamic>.from(_decodeJson(resp));
+      if (json['error'] != null) return false;
+      final result = json['result'] as Map<String, dynamic>?;
+      final type = result?['type'];
+      return type == 'chatItemUpdated' || type == 'chatItemNotChanged';
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Deletes a chat item (`/_delete item chatRef itemId broadcast|internal`).
+  ///
+  /// `CIDeleteMode` in `Messages/CIContent.hs:111` names the two modes the UI
+  /// can ask for; `broadcast` also reaches the peer, `internal` only drops the
+  /// local copy.
+  Future<bool> deleteMessage(
+    String chatRef,
+    int itemId, {
+    required bool forEveryone,
+  }) async {
+    final mode = forEveryone ? 'broadcast' : 'internal';
+    final resp = await sendCommand('/_delete item $chatRef $itemId $mode');
+    if (resp == null) return false;
+    try {
+      final json = Map<String, dynamic>.from(_decodeJson(resp));
+      if (json['error'] != null) return false;
+      final result = json['result'] as Map<String, dynamic>?;
+      return result?['type'] == 'chatItemsDeleted';
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> forwardMessages(
+    String toChatRef,
+    String fromChatRef,
+    List<int> itemIds,
+  ) async {
+    if (itemIds.isEmpty) return false;
+    final resp = await sendCommand(
+      '/_forward $toChatRef $fromChatRef ${itemIds.join(',')}',
+    );
+    if (resp == null) return false;
+    try {
+      final json = Map<String, dynamic>.from(_decodeJson(resp));
+      if (json['error'] != null) return false;
+      final result = json['result'] as Map<String, dynamic>?;
+      return result?['type'] == 'newChatItems';
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Adds or removes an emoji reaction on a chat item (`/_reaction`).
+  Future<bool> setReaction(
+    String chatRef,
+    int itemId,
+    String emoji, {
+    required bool add,
+  }) async {
+    // The core parses the heart as a single U+2764 char; the emoji
+    // presentation selector makes `mrEmojiChar` reject the reaction.
+    final wire = emoji == '❤️' ? '❤' : emoji;
+    final reaction = _jsonCompact({'type': 'emoji', 'emoji': wire});
+    final resp = await sendCommand(
+      '/_reaction $chatRef $itemId ${add ? 'on' : 'off'} $reaction',
+    );
+    if (resp == null) return false;
+    try {
+      final json = Map<String, dynamic>.from(_decodeJson(resp));
+      return json['error'] == null && json['result'] != null;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Accepts an incoming contact request by its request id.
+  Future<bool> acceptContactRequest(int requestId, {bool incognito = false}) async {
+    final resp = await sendCommand(
+      '/_accept incognito=${incognito ? 'on' : 'off'} $requestId',
+    );
+    if (resp == null) return false;
+    try {
+      final json = Map<String, dynamic>.from(_decodeJson(resp));
+      final result = json['result'] as Map<String, dynamic>?;
+      return result?['type'] == 'acceptingContactRequest';
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Rejects an incoming contact request by its request id.
+  Future<bool> rejectContactRequest(int requestId) async {
+    final resp = await sendCommand('/_reject $requestId');
+    if (resp == null) return false;
+    try {
+      final json = Map<String, dynamic>.from(_decodeJson(resp));
+      final result = json['result'] as Map<String, dynamic>?;
+      return result?['type'] == 'contactRequestRejected';
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// Whether a direct chat ([chatRef] like `@12`) can send messages right now.
   Future<bool?> getContactMessagingReady(String chatRef) async {
     if (!chatRef.startsWith('@')) return null;
@@ -434,9 +563,11 @@ class TanglexService {
   Future<bool> sendImages(
     String chatRef,
     List<ImagePayload> images, {
+    String text = '',
     int? quotedItemId,
   }) async {
     if (images.isEmpty) return false;
+    String captionFor(int index) => index == 0 ? text : '';
     final composed = <Map<String, dynamic>>[];
     for (int i = 0; i < images.length; i++) {
       final img = images[i];
@@ -444,7 +575,7 @@ class TanglexService {
         'filePath': img.filePath,
         'msgContent': {
           'type': 'image',
-          'text': '',
+          'text': captionFor(i),
           'image':
               'data:${img.previewMime};base64,${base64Encode(img.previewBytes)}',
         },
@@ -459,13 +590,14 @@ class TanglexService {
     // Avoid largeMsg by splitting big payloads.
     if (jsonStr.length > 200000 && images.length > 1) {
       bool allOk = true;
-      for (final img in images) {
+      for (var i = 0; i < images.length; i++) {
+        final img = images[i];
         final part = jsonEncode([
           {
             'filePath': img.filePath,
             'msgContent': {
               'type': 'image',
-              'text': '',
+              'text': captionFor(i),
               'image':
                   'data:${img.previewMime};base64,${base64Encode(img.previewBytes)}',
             },
@@ -699,34 +831,6 @@ class TanglexService {
     }
   }
 
-  /// Accept contact request
-  Future<bool> acceptContactRequest(int contactRequestId) async {
-    final resp = await sendCommand('/_accept $contactRequestId');
-    if (resp == null) return false;
-    try {
-      final json = Map<String, dynamic>.from(_decodeJson(resp));
-      if (json.containsKey('error')) return false;
-      final result = json['result'] as Map<String, dynamic>?;
-      return result != null && result['type'] == 'acceptingContactRequest';
-    } catch (_) {
-      return false;
-    }
-  }
-
-  /// Reject contact request
-  Future<bool> rejectContactRequest(int contactRequestId) async {
-    final resp = await sendCommand('/_reject $contactRequestId');
-    if (resp == null) return false;
-    try {
-      final json = Map<String, dynamic>.from(_decodeJson(resp));
-      if (json.containsKey('error')) return false;
-      final result = json['result'] as Map<String, dynamic>?;
-      return result != null && result['type'] == 'contactRequestRejected';
-    } catch (_) {
-      return false;
-    }
-  }
-
   /// Create a user profile
   Future<Map<String, dynamic>?> createUserProfile({
     required String displayName,
@@ -765,6 +869,9 @@ class TanglexService {
             localDisplayName: user['localDisplayName'] as String?,
           ),
         );
+        // `APIUpdateProfile` answers `chatNotStarted` until the core runs the
+        // chat for this user; the official client starts it right away.
+        await _startChatIfPossible();
         return result;
       }
       return json;
@@ -779,20 +886,28 @@ class TanglexService {
     required String displayName,
     String fullName = '',
     String? shortDescr,
+    String? image,
   }) async {
     final profile = {
       'displayName': displayName,
       'fullName': fullName,
       'shortDescr': shortDescr,
-      'image': null,
+      'image': image,
       'contactLink': null,
       'peerType': null,
       'preferences': null,
     };
-    final resp = await sendCommand('/_profile $userId ${_jsonCompact(profile)}');
+    var resp = await sendCommand('/_profile $userId ${_jsonCompact(profile)}');
     if (resp == null) return false;
     try {
-      final json = Map<String, dynamic>.from(_decodeJson(resp));
+      var json = Map<String, dynamic>.from(_decodeJson(resp));
+      // The core reports this as a top-level `error` before the chat runs.
+      if (_parseApiCommandError(json).$1 == 'chatNotStarted') {
+        await _startChatIfPossible();
+        resp = await sendCommand('/_profile $userId ${_jsonCompact(profile)}');
+        if (resp == null) return false;
+        json = Map<String, dynamic>.from(_decodeJson(resp));
+      }
       if (json.containsKey('error')) return false;
       final result = json['result'] as Map<String, dynamic>?;
       final type = result?['type'];
@@ -866,14 +981,9 @@ class TanglexService {
     final resp = await sendCommand('/users');
     if (resp == null) return [];
     try {
-      final json = Map<String, dynamic>.from(_decodeJson(resp));
-      final result = json['result'] as Map<String, dynamic>?;
-      if (result == null || result['type'] != 'usersList') return [];
-      final users = result['users'] as List? ?? [];
-      return users
-          .whereType<Map>()
-          .map((u) => Map<String, dynamic>.from(u))
-          .toList();
+      return parseUsersListResponse(
+        Map<String, dynamic>.from(_decodeJson(resp)),
+      );
     } catch (_) {
       return [];
     }
@@ -1514,4 +1624,20 @@ class ImagePayload {
     required this.previewBytes,
     required this.previewMime,
   });
+}
+
+
+/// `/users` answers `[{"user": {...}, "unreadCount": n}]`; callers want the
+/// profile itself. Passing the wrapper to `AccountProfile` used to produce
+/// `userId: 0`, so every `/_profile` update addressed a nonexistent user.
+@visibleForTesting
+List<Map<String, dynamic>> parseUsersListResponse(Map<String, dynamic> json) {
+  final result = json['result'] as Map<String, dynamic>?;
+  if (result == null || result['type'] != 'usersList') return const [];
+  final users = result['users'] as List? ?? const [];
+  return [
+    for (final entry in users)
+      if (entry is Map && entry['user'] is Map)
+        Map<String, dynamic>.from(entry['user'] as Map),
+  ];
 }

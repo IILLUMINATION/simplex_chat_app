@@ -1,9 +1,14 @@
+import 'dart:io';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../data/account_models.dart';
 import '../data/account_providers.dart';
+import '../data/profile_image.dart';
 import '../design/app_theme.dart';
 import 'widgets/peer_avatar.dart';
 
@@ -63,9 +68,81 @@ class _OwnProfileScreenState extends ConsumerState<OwnProfileScreen> {
           displayName: draft.displayName,
           fullName: draft.fullName,
           shortDescr: draft.shortDescr,
+          image: account.image,
         );
     if (!mounted) return;
     _toast(ok ? 'Profile updated' : 'Could not update the profile');
+  }
+
+  Future<Uint8List?> _pickProfileImage() async {
+    if (Platform.isLinux || Platform.isWindows || Platform.isMacOS) {
+      final result = await FilePicker.platform.pickFiles(type: FileType.image);
+      final path = result?.files.single.path;
+      return path == null ? null : File(path).readAsBytes();
+    }
+    final picked = await ImagePicker().pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 90,
+    );
+    return picked?.readAsBytes();
+  }
+
+  Future<void> _savePhoto(AccountProfile account, String? image) async {
+    final ok = await ref
+        .read(accountsProvider.notifier)
+        .updateProfile(
+          account.userId,
+          displayName: account.displayName,
+          fullName: account.fullName,
+          shortDescr: account.shortDescr,
+          image: image,
+        );
+    if (!mounted) return;
+    _toast(ok ? 'Profile photo updated' : 'Could not update the photo');
+  }
+
+  Future<void> _changePhoto(AccountProfile account) async {
+    final bytes = await _pickProfileImage();
+    if (bytes == null || !mounted) return;
+    final image = profileImageDataUri(bytes);
+    if (image == null) {
+      _toast('Could not read that image');
+      return;
+    }
+    await _savePhoto(account, image);
+  }
+
+  /// Telegram Desktop opens a small menu on the profile photo: set a new one
+  /// or remove the current one. Same two actions here.
+  Future<void> _showAvatarMenu(
+    AccountProfile account,
+    BuildContext avatarContext,
+  ) async {
+    final box = avatarContext.findRenderObject() as RenderBox?;
+    final overlay =
+        Overlay.of(avatarContext).context.findRenderObject() as RenderBox?;
+    if (box == null || overlay == null) return;
+    final topLeft = box.localToGlobal(Offset.zero, ancestor: overlay);
+    final bottomRight = box.localToGlobal(box.size.bottomRight(Offset.zero), ancestor: overlay);
+    final hasPhoto = account.image != null && account.image!.isNotEmpty;
+    final action = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromRect(
+        Rect.fromPoints(topLeft, bottomRight),
+        Offset.zero & overlay.size,
+      ),
+      items: [
+        const PopupMenuItem(value: 'set', child: Text('Set new photo')),
+        if (hasPhoto)
+          const PopupMenuItem(value: 'delete', child: Text('Delete photo')),
+      ],
+    );
+    if (action == null || !mounted) return;
+    if (action == 'set') {
+      await _changePhoto(account);
+    } else if (action == 'delete') {
+      await _savePhoto(account, null);
+    }
   }
 
   void _toast(String message) {
@@ -139,6 +216,10 @@ class _OwnProfileScreenState extends ConsumerState<OwnProfileScreen> {
                   addressError: _addressError,
                   onCopyAddress: () => _copyAddress(account),
                   onEdit: () => _edit(account),
+                  onPhotoTap: (avatarContext) => _showAvatarMenu(
+                    account,
+                    avatarContext,
+                  ),
                 ),
               },
             ),
@@ -157,6 +238,7 @@ class _ProfileBody extends StatelessWidget {
     required this.addressError,
     required this.onCopyAddress,
     required this.onEdit,
+    required this.onPhotoTap,
   });
 
   final AccountProfile account;
@@ -165,6 +247,7 @@ class _ProfileBody extends StatelessWidget {
   final String? addressError;
   final VoidCallback onCopyAddress;
   final VoidCallback onEdit;
+  final ValueChanged<BuildContext> onPhotoTap;
 
   @override
   Widget build(BuildContext context) {
@@ -176,11 +259,18 @@ class _ProfileBody extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 28, 16, 32),
       children: [
         Center(
-          child: PeerAvatar(
-            seed: 'user-${account.userId}',
-            title: account.displayName,
-            size: 112,
-            fontSize: 40,
+          child: Builder(
+            builder: (avatarContext) => GestureDetector(
+              key: const ValueKey('profile-avatar'),
+              onTap: () => onPhotoTap(avatarContext),
+              child: PeerAvatar(
+                seed: 'user-${account.userId}',
+                title: account.displayName,
+                size: 112,
+                fontSize: 40,
+                imageBytes: profileImageBytes(account.image),
+              ),
+            ),
           ),
         ),
         const SizedBox(height: 16),

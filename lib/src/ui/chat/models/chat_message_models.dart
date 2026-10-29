@@ -1,5 +1,7 @@
 import 'dart:typed_data';
 
+import '../../../data/formatted_text.dart';
+
 class UiMessage {
   final String key;
   final String text;
@@ -19,6 +21,24 @@ class UiMessage {
   final String? fileStatusType;
   final int? transferProgress;
   final int? transferTotal;
+  final List<UiReaction> reactions;
+
+  /// Spans from `ChatItem.formattedText`; null when the text is plain or the
+  /// parser had to rewrite it (prefixes for voice/report items).
+  final List<MessageSpan>? formattedText;
+
+  /// `CIMeta.itemEdited`: the message text was changed after sending.
+  final bool edited;
+
+  /// `CIMeta.editable`: sent, under 24h, not forwarded, not deleted.
+  final bool editable;
+
+  /// `CIMeta.deletable`: the core will broadcast the deletion to the peer.
+  final bool deletable;
+
+  /// `CIMeta.itemForwarded`: renders the "Forwarded from …" header.
+  final bool forwarded;
+  final String? forwardedFrom;
 
   const UiMessage({
     required this.key,
@@ -39,7 +59,22 @@ class UiMessage {
     this.fileStatusType,
     this.transferProgress,
     this.transferTotal,
+    this.reactions = const [],
+    this.formattedText,
+    this.edited = false,
+    this.editable = false,
+    this.deletable = false,
+    this.forwarded = false,
+    this.forwardedFrom,
   });
+}
+
+class UiReaction {
+  final String emoji;
+  final int count;
+  final bool mine;
+
+  const UiReaction({required this.emoji, this.count = 1, this.mine = false});
 }
 
 class UiImage {
@@ -106,10 +141,25 @@ class AudioNowPlaying {
 
 class QuotedMessage {
   final String text;
+
+  /// Group member name carried by `chatDir.groupMember` for group replies.
   final String senderName;
+
+  /// `directSnd`, `directRcv`, `groupSnd`, `groupRcv`, ... — decides who the
+  /// quote is attributed to, exactly like `CIQuote.sender` upstream.
+  final String chatDir;
   final int? itemId;
 
-  const QuotedMessage({required this.text, this.senderName = '', this.itemId});
+  /// `CIQuote.formattedText`.
+  final List<MessageSpan>? formattedText;
+
+  const QuotedMessage({
+    required this.text,
+    this.senderName = '',
+    this.chatDir = '',
+    this.itemId,
+    this.formattedText,
+  });
 }
 
 class PreviewPayload {

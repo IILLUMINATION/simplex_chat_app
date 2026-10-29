@@ -80,6 +80,7 @@ class AccountsNotifier extends AsyncNotifier<AccountsState> {
     required String displayName,
     String fullName = '',
     String? shortDescr,
+    String? image,
   }) async {
     final ok = await ref
         .read(chatCoreProvider)
@@ -88,6 +89,7 @@ class AccountsNotifier extends AsyncNotifier<AccountsState> {
           displayName: displayName,
           fullName: fullName,
           shortDescr: shortDescr,
+          image: image,
         );
     if (ok) await refresh();
     return ok;
